@@ -95,6 +95,7 @@ class FamilyMember(BaseModel):
     allergies: list[str] = []           # e.g. "milk", "peanut", "egg"
     health_conditions: list[str] = []   # e.g. "diabetes", "hypertension"
     food_preferences: list[str] = []    # e.g. "vegetarian"
+    cuisine_preferences: list[str] = [] # e.g. "Indian", "Italian", "Chinese", "Mexican"; empty = any cuisine
 
 class NutrientTotals(BaseModel):
     calories: float = 0        # kcal
@@ -312,6 +313,11 @@ The functions raise `AIServiceError(code, message, retry)` (from `ai_services.er
 **Safety**
 - Items that match a member's allergies are removed in code after generation.
 - Suggestions are general nutrition guidance, not medical advice.
+
+**Cuisine preferences**
+- `cuisine_preferences` on each `FamilyMember` is used by `suggest_recipes`, `generate_meal_plan`, and `generate_grocery_list`. Plans and recipes favor the chosen cuisines, and the grocery list is built from foods that match them.
+- If the list is empty, any cuisine can be used.
+- Meal and fridge photo analysis does not depend on cuisine and works for any dish.
 
 **Input limits**
 - Images: JPEG or PNG (WebP also works), up to 5 MB. Pass raw bytes and the MIME type, not base64.
