@@ -1,0 +1,21 @@
+# Flutter
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+ 
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+ 
+# IDE
+.idea/
+.vscode/
+ 
+# Logs
+*.log
