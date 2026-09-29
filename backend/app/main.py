@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
-from passlib.context import CryptContext
+import bcrypt
 
 import ai_services
 from ai_services.schemas import (
@@ -25,7 +25,18 @@ from app.models.user import User, FamilyMemberModel
 # Auto-create tables in Supabase / SQLite
 Base.metadata.create_all(bind=engine)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    # Truncate to 72 bytes to strictly respect bcrypt limits
+    pwd_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    pwd_bytes = plain_password.encode('utf-8')[:72]
+    return bcrypt.checkpw(pwd_bytes, hashed_password.encode('utf-8'))
+
 
 app = FastAPI(
     title="NutriWise AI API",
@@ -84,13 +95,130 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email is already registered."
         )
-    hashed_password = pwd_context.hash(payload.password)
+    hashed_password = hash_password(payload.password)
     user_record = User(name=payload.name, email=payload.email,
                        password_hash=hashed_password)
     db.add(user_record)
     db.commit()
     db.refresh(user_record)
     return user_record
+
+# ----------------- FAMILY MEMBER CRUD ENDPOINTS -----------------
+
+
+@app.post("/api/family/members", response_model=FamilyMember, status_code=status.HTTP_201_CREATED)
+def create_family_member(
+    member: FamilyMember,
+    user_id: int,  # For MVP testing, pass ?user_id=1 as query param
+    db: Session = Depends(get_db)
+):
+    """
+    Creates and saves a new family member linked to a user.
+    Uses the exact FamilyMember schema from ai-services.
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found")
+
+    db_member = FamilyMemberModel(
+        user_id=user_id,
+        name=member.name,
+        age=member.age,
+        gender=member.gender,
+        allergies=member.allergies,
+        health_conditions=member.health_conditions,
+        food_preferences=member.food_preferences,
+        cuisine_preferences=member.cuisine_preferences,
+    )
+    db.add(db_member)
+    db.commit()
+    db.refresh(db_member)
+
+    # Return as an AI Contract-compliant FamilyMember schema
+    return FamilyMember(
+        id=str(db_member.id),
+        name=db_member.name,
+        age=db_member.age,
+        gender=db_member.gender,
+        allergies=db_member.allergies or [],
+        health_conditions=db_member.health_conditions or [],
+        food_preferences=db_member.food_preferences or [],
+        cuisine_preferences=db_member.cuisine_preferences or [],
+    )
+
+
+@app.get("/api/family/members", response_model=list[FamilyMember])
+def list_family_members(user_id: int, db: Session = Depends(get_db)):
+    """
+    Returns all family members linked to the user account.
+    """
+    members = db.query(FamilyMemberModel).filter(
+        FamilyMemberModel.user_id == user_id).all()
+    return [
+        FamilyMember(
+            id=str(m.id),
+            name=m.name,
+            age=m.age,
+            gender=m.gender,
+            allergies=m.allergies or [],
+            health_conditions=m.health_conditions or [],
+            food_preferences=m.food_preferences or [],
+            cuisine_preferences=m.cuisine_preferences or [],
+        )
+        for m in members
+    ]
+
+
+@app.put("/api/family/members/{member_id}", response_model=FamilyMember)
+def update_family_member(
+    member_id: int,
+    payload: FamilyMember,
+    db: Session = Depends(get_db)
+):
+    """
+    Updates an existing family member's details or dietary preferences.
+    """
+    db_member = db.query(FamilyMemberModel).filter(
+        FamilyMemberModel.id == member_id).first()
+    if not db_member:
+        raise HTTPException(status_code=404, detail="Family member not found")
+
+    db_member.name = payload.name
+    db_member.age = payload.age
+    db_member.gender = payload.gender
+    db_member.allergies = payload.allergies
+    db_member.health_conditions = payload.health_conditions
+    db_member.food_preferences = payload.food_preferences
+    db_member.cuisine_preferences = payload.cuisine_preferences
+
+    db.commit()
+    db.refresh(db_member)
+
+    return FamilyMember(
+        id=str(db_member.id),
+        name=db_member.name,
+        age=db_member.age,
+        gender=db_member.gender,
+        allergies=db_member.allergies or [],
+        health_conditions=db_member.health_conditions or [],
+        food_preferences=db_member.food_preferences or [],
+        cuisine_preferences=db_member.cuisine_preferences or [],
+    )
+
+
+@app.delete("/api/family/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_family_member(member_id: int, db: Session = Depends(get_db)):
+    """
+    Removes a family member.
+    """
+    db_member = db.query(FamilyMemberModel).filter(
+        FamilyMemberModel.id == member_id).first()
+    if not db_member:
+        raise HTTPException(status_code=404, detail="Family member not found")
+
+    db.delete(db_member)
+    db.commit()
+    return None
 
 # ----------------- AI CONTRACT ENDPOINTS -----------------
 
