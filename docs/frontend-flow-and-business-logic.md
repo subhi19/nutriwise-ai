@@ -1,13 +1,14 @@
 # NutriWise AI — Frontend Flow & Business Logic Reference
 
 **Owner:** Frontend (Flutter)
-**Status:** Draft v1.0 — based on hand-drawn wireframes, reconciled against `ai-services` contract and `backend` API contract
+**Status:** v1.4 — Meal Planner Tab now has an optional fridge/grocery photo step feeding into the full 7-day plan and grocery list
 **Purpose:** Single source of truth for every screen, its flow, its validations, and how it maps to the real backend/AI endpoints. Read this before building any screen.
 
 > **Legend used throughout this doc**
 > ✅ Confirmed — matches an existing backend/AI contract endpoint exactly
 > ⚠️ Needs confirmation — endpoint exists but a detail is unconfirmed
-> 🚧 Gap — no backend/AI endpoint exists yet for this; do not build against it until resolved
+> 🚧 Gap — no backend/AI endpoint exists yet, or a schema mismatch needs resolving
+> ❌ Cut from MVP — decided, do not build
 
 ---
 
@@ -25,22 +26,20 @@
 
 ## 2. Full Screen Inventory
 
-This supersedes the original 7-screen list from the initial planning doc — the wireframes added auth screens and split "Fridge Analysis" into two distinct features.
-
-| # | Screen (from sketches) | Route | File | Maps to | Status |
+| # | Screen | Route | File | Maps to | Status |
 |---|---|---|---|---|---|
 | 1 | Splash | `/` | `splash_screen.dart` | — | ✅ |
-| 2 | Login | `/login` | `login_screen.dart` | `POST /auth/login` | ⚠️ not in backend doc yet — confirm with backend |
+| 2 | Login | `/login` | `login_screen.dart` | `POST /auth/login` — new, being built by backend | ⚠️ proposed contract in §4.2 |
 | 3 | Sign Up | `/signup` | `signup_screen.dart` | `POST /auth/register` | ✅ |
-| 4 | Profile Creation | `/profile` | `family_profile_screen.dart` | ⚠️ no save-member endpoint documented yet | ⚠️ confirm with backend |
-| 5 | Dashboard (4 tabs) | `/dashboard` | `dashboard_screen.dart` | — | ✅ (layout changed — see §6) |
+| 4 | Profile Creation | `/profile` | `family_profile_screen.dart` | `POST /api/family/members` | ✅ |
+| 5 | Dashboard (4 tabs) | `/dashboard` | `dashboard_screen.dart` | — | ✅ |
 | 6 | Nutrient Analyzer | `/meal` | `meal_analysis_screen.dart` | `POST /api/meal/analyze`, `POST /api/meal/correct` | ✅ |
-| 7 | Home Inventory Based Meal Suggestion | `/fridge` | `fridge_analysis_screen.dart` | `POST /api/fridge/analyze` → `POST /api/meal-plan/generate` (with inventory) | ✅ (see §8 for exact mapping) |
-| 8 | Weekly Meal Planner | `/plan` | `meal_plan_screen.dart` | `POST /api/meal-plan/generate` (no inventory) | ✅ |
+| 7 | Meal Planner Tab | `/plan` | `meal_plan_screen.dart` | Optional `POST /api/fridge/analyze` → `POST /api/meal-plan/generate` → `POST /api/grocery-list/generate` | ✅ flow updated, see §9 — 🚧 `day_preferences` payload needs confirmation |
+| 8 | Home Inventory Based Meal Suggestion | `/fridge` | `fridge_analysis_screen.dart` | `POST /api/fridge/analyze` → `POST /api/meal-plan/generate` (fridge-only suggestion) | ✅ flow in §8 — see note below on overlap with §9 |
 | 9 | Grocery List | `/grocery` | `grocery_list_screen.dart` | `POST /api/grocery-list/generate` | ✅ |
-| 10 | Grocery Purchase Based Weekly Planner | `/grocery-bill` | `grocery_bill_screen.dart` | **No matching AI/backend function** | 🚧 **GAP — see §11** |
+| ~~10~~ | ~~Grocery Purchase Based Weekly Planner~~ | — | — | — | ❌ **Cut from MVP** |
 
-**Action for you today:** raise items 2, 4, and 10 with your team in chat. Don't start building screens 2, 4 (its save call), or 10 until answered — everything else is safe to build now.
+> ⚠️ **UX overlap to confirm with the team:** both §7 and §8 now let the user upload a fridge/grocery photo. They produce different results — §8 gives one quick suggestion built only from what's in the fridge; §9 (the Meal Planner) gives a full customizable 7-day plan across all family members and per-day meal types, which can *optionally* also account for what's already at home. This is intentional (quick suggestion vs. full planning), but confirm the tab labels/descriptions make this distinction clear on the Dashboard so users aren't confused about which one to use.
 
 ---
 
@@ -58,49 +57,54 @@ flowchart TD
     F -->|No| G[Profile Creation Screen]
     G -->|Success| E
     G -->|Failure| G
-    E --> H[Tab: Weekly Meal Planner]
+    E --> H[Tab: Meal Planner]
     E --> I[Tab: Nutrient Analyzer]
-    E --> J[Tab: Home Inventory Meal Suggestion]
-    E --> K[Tab: Grocery Purchase Planner - GAP]
+    E --> J[Tab: Home Inventory Based Meal Suggestion]
+    E --> K[Tab: Grocery List]
 ```
 
 ---
 
-## 4. Authentication Flow (Login / Sign Up)
+## 4. Authentication Flow
 
-### 4.1 Sign Up
+### 4.1 Sign Up — ✅ confirmed
 
 ```mermaid
 flowchart TD
-    A[Sign Up Screen] --> B[Enter Email]
-    B --> C{Valid email format?}
-    C -->|No| B2[Show inline error]
-    C -->|Yes| D[Enter Password]
-    D --> E{Meets password rules?}
-    E -->|No| D2[Show inline error]
-    E -->|Yes| F[Confirm Password]
-    F --> G{Matches?}
-    G -->|No| F2[Show inline error]
-    G -->|Yes| H[Tap Create Account]
-    H --> I[POST /auth/register]
-    I --> J{201 Created?}
-    J -->|Yes| K[Navigate to Login Screen with success toast]
-    J -->|No - 409 email exists| L[Show: Email already registered, offer Login]
-    J -->|No - other error| M[Show generic error, allow retry]
+    A[Sign Up Screen] --> B[Enter Name, Email, Password, Confirm]
+    B --> C{Client validation passes?}
+    C -->|No| B2[Inline errors]
+    C -->|Yes| D[POST /auth/register]
+    D --> E{201 Created?}
+    E -->|Yes| F[Navigate to Login with success toast]
+    E -->|No - 409 email exists| G[Show: Email already registered, offer Login]
+    E -->|No - other| H[Generic error, allow retry]
 ```
 
-**Validation rules (Sign Up)**
+**Validation:** Name 2–50 chars · Email valid format · Password min 8 chars, 1 letter, 1 number · Confirm must match.
 
-| Field | Rule | Error message |
-|---|---|---|
-| Name | Required, 2–50 chars | "Please enter your name" |
-| Email | Required, RFC email regex | "Enter a valid email address" |
-| Password | Min 8 chars, 1 letter, 1 number | "Password must be at least 8 characters with a letter and a number" |
-| Confirm password | Must equal password | "Passwords don't match" |
+### 4.2 Login — proposed contract, endpoint being built by backend
 
-Disable the **Create Account** button until the form is valid (`Form` + `GlobalKey<FormState>`, validate on every change, not only on submit).
+**Proposed request**
+```json
+POST /auth/login
+{ "email": "venkat@example.com", "password": "SecurePassword123" }
+```
 
-### 4.2 Login
+**Proposed response (200 OK)**
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "user": { "id": 1, "name": "Venkat", "email": "venkat@example.com" }
+}
+```
+
+**Proposed error (401)**
+```json
+{ "error": { "code": "INVALID_CREDENTIALS", "message": "Incorrect email or password", "retry": false } }
+```
 
 ```mermaid
 flowchart TD
@@ -108,26 +112,24 @@ flowchart TD
     B --> C[Tap Login]
     C --> D[POST /auth/login]
     D --> E{200 OK?}
-    E -->|Yes| F[Store token securely]
-    F --> G{Has family profile?}
-    G -->|Yes| H[Dashboard]
-    G -->|No| I[Profile Creation]
-    E -->|No - 401| J[Show: Incorrect email or password]
-    E -->|No - AI_BUSY/network| K[Show retry banner]
+    E -->|Yes| F[Store access_token securely, note expiry]
+    F --> G[GET /api/family/members]
+    G --> H{Any members returned?}
+    H -->|Yes| I[Dashboard]
+    H -->|No| J[Profile Creation]
+    E -->|No - 401| K[Show: Incorrect email or password]
+    E -->|No - network/AI_BUSY| L[Retry banner]
 ```
 
-**"Forgot Password" and "Sign Up" links** sit below the Login button per your sketch — both are secondary `TextButton`s, not primary buttons, so they don't compete visually with Login.
+> ⚠️ Send this proposed contract to backend today; build against it now with `MockApi`, adjust only if the real implementation differs.
 
-> ⚠️ **Confirm with backend:** `/auth/login` response shape (does it return a JWT? refresh token? expiry?) before building the token-storage logic in §4.3.
+### 4.3 Security for auth
 
-### 4.3 Security for auth (build this once, in `services/`)
-
-- **Never store the password anywhere** after submission — not in state, not in logs.
-- Store the returned auth token using **`flutter_secure_storage`**, not `SharedPreferences` (SharedPreferences is unencrypted).
-- Attach the token as an `Authorization: Bearer <token>` header on every authenticated Dio request via a Dio interceptor, so you don't repeat this per-call.
-- On a `401` response from any endpoint (token expired), clear the stored token and route back to `/login` automatically — build this as a global Dio interceptor, not per-screen logic.
-- All API calls go over **HTTPS only** — never allow `http://` in the production `baseUrl`. Keep a separate debug-only `http://10.0.2.2:8000` for the Android emulator during local testing, but ensure it can't ship in a release build (guard with `kReleaseMode`).
-- Add `flutter pub add flutter_secure_storage` now.
+- Token stored via `flutter_secure_storage`, never `SharedPreferences`.
+- `Authorization: Bearer <token>` attached via one Dio interceptor.
+- Global 401 interceptor clears token, routes to `/login`.
+- HTTPS only in release builds.
+- Never store or log the password after submission.
 
 ---
 
@@ -135,139 +137,180 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Explore Now / Profile Creation entry] --> B[Family Member Form]
-    B --> C[Fill: Name, Age, Gender]
-    C --> D[Select Allergies - chips]
-    D --> E[Select Health Conditions - chips]
-    E --> F[Select Food Preferences - chips]
-    F --> G[Select Cuisine Preferences - chips]
+    A[Profile Creation entry] --> B[Family Member Form]
+    B --> C[Name, Age, Gender]
+    C --> D[Allergies - multiselect chips]
+    D --> E[Other allergen - free text, comma separated]
+    E --> F[Food Preference - single select]
+    F --> G[Cuisine Preference - multiselect]
     G --> H[Tap Save Member]
-    H --> I{Client-side validation passes?}
-    I -->|No| I2[Highlight mandatory fields, block submit]
-    I -->|Yes| J[Call save-member endpoint]
-    J --> K{Success?}
-    K -->|Yes| L[Add to family list, show +Add Another Member]
-    K -->|No| M[Show failure message + retry]
-    L --> N{Add another member?}
+    H --> I{Client validation passes?}
+    I -->|No| I2[Highlight mandatory fields]
+    I -->|Yes| J[POST /api/family/members?user_id=X]
+    J --> K{201 Created?}
+    K -->|Yes| L[Add to list, show +Add Another Member]
+    K -->|No| M[Failure message + retry]
+    L --> N{Add another?}
     N -->|Yes| B
-    N -->|No| O[Tap Continue to Dashboard]
-    O --> P[Dashboard]
+    N -->|No| O[Continue to Dashboard]
 ```
 
-**Validation rules (Family Member form)**
+**Confirmed endpoints**
+
+| Action | Endpoint | Returns |
+|---|---|---|
+| Create member | `POST /api/family/members?user_id={userId}` | `201 Created` |
+| List members | `GET /api/family/members?user_id={userId}` | `200 OK`, `List<FamilyMember>` |
+| Update member | `PUT /api/family/members/{memberId}` | `200 OK` |
+| Delete member | `DELETE /api/family/members/{memberId}` | `204 No Content` |
+
+**Validation rules**
 
 | Field | Rule |
 |---|---|
 | Name | Required, 2–50 chars |
 | Age | Required, integer 0–120 |
 | Gender | Required, single select |
-| Allergies | Optional, multi-select from shared vocabulary list (see §12) |
-| Health conditions | Optional, multi-select |
-| Food preferences | Optional, multi-select |
-| Cuisine preferences | Optional, multi-select — empty means "any cuisine" per AI contract, so don't force a minimum selection |
+| Allergies | Multi-select chips from fixed vocabulary (§12). Optional. |
+| Other allergen (free text) | Optional. Comma-separated. Hint: *"e.g. sesame, mustard"*. Split, trim, lowercase, merge into `allergies`. |
+| Health condition | **Removed from this form for MVP.** Keep `healthConditions: []` in the model. |
+| Food preference | Single select — vegetarian / non_vegetarian / eggetarian / vegan. Household-level default, separate from the per-day meal type in §9. |
+| Cuisine preference | Multi-select chips. Empty = any cuisine. |
 
-At least **one family member** is mandatory before "Continue to Dashboard" is enabled — this matches your sketch's "Check validations, mandatory fields" note and the AI contract's requirement that `family: list[FamilyMember]` is never empty on plan/grocery calls.
-
-> ⚠️ **Confirm with backend today:** which endpoint actually persists a `FamilyMember`. The contract shows `POST /auth/register` for the *user account* only — there's no documented endpoint for saving a family member. This blocks real (non-mock) implementation of this screen.
+At least one family member is mandatory before "Continue to Dashboard" is enabled.
 
 ---
 
 ## 6. Dashboard — 4 Tabs
 
-Per your sketch, the dashboard is reorganized into four tabs rather than four static cards:
-
 ```mermaid
 flowchart LR
-    D[Dashboard] --> T1[Weekly Meal Planner]
-    D --> T2[Nutrients Analyzer]
-    D --> T3[Home Inventory Based Meal Suggestion]
-    D --> T4[Grocery Purchase Based Weekly Planner - GAP]
+    D[Dashboard] --> T1[Meal Planner Tab]
+    D --> T2[Nutrient Analyzer Tab]
+    D --> T3[Home Inventory Based Meal Suggestion Tab]
+    D --> T4[Grocery List Tab]
 ```
 
-Build this with a `TabBar`/`TabBarView` (or `BottomNavigationBar` — recommended for older users, since bottom tabs are more thumb-reachable and higher-contrast than a scrollable top tab bar). Each tab's content is effectively an entry point into the corresponding full-screen flow (§7–§11), either embedded or pushed as a new route — **push as a new route** for now, it's simpler to build and test independently per screen.
+Use a `BottomNavigationBar` for thumb-reachability across ages. See the UX overlap note in §2 regarding tabs 1 and 3.
 
 ---
 
-## 7. Nutrient Analyzer (Meal Analysis)
+## 7. Nutrient Analyzer
 
 ```mermaid
 flowchart TD
     A[Upload Food Image] --> B[Camera or Gallery]
     B --> C[Optional: Add Notes]
     C --> D[Tap Analyze]
-    D --> E[POST /api/meal/analyze - multipart: image + member_data]
-    E --> F{Success?}
-    F -->|NO_FOOD_DETECTED| G[Prompt: retake photo, no retry button]
-    F -->|INVALID_IMAGE| H[Show file error, no retry button]
-    F -->|AI_BUSY / AI_INVALID_RESPONSE| I[Show retry banner]
-    F -->|200 OK| J[Show Result Card: foods, nutrients, missing nutrients, suggestions]
-    J --> K{User taps Correct Meal?}
-    K -->|Yes| L[Edit/add item form]
-    L --> M[POST /api/meal/correct]
-    M --> J
-    K -->|No| N[Tap Love It]
-    N --> O[Save to history, return to Dashboard]
+    D --> E[POST /api/meal/analyze]
+    E --> F{Result}
+    F -->|NO_FOOD_DETECTED| G[Prompt retake photo, no retry]
+    F -->|INVALID_IMAGE| H[File error, no retry]
+    F -->|AI_BUSY / AI_INVALID_RESPONSE| I[Retry banner]
+    F -->|200 OK| J[Result card: foods, nutrients, missing nutrients, suggestions]
+    J --> K{Correct Meal?}
+    K -->|Yes| L[Edit/add item] --> M[POST /api/meal/correct] --> J
+    K -->|No| N[Love It] --> O[Save, return to Dashboard]
 ```
 
-**Result card must show, per your sketch:**
-- Detected foods + quantities
-- Nutrients present (green chips)
-- Missing nutrients (orange chips) — this drives the "suggest what to add in future" note from Image 4
-- Suggestions (plain text list)
-- `DisclaimerBanner`: "AI-generated suggestions, not medical advice."
-
-**Correct Meal sub-flow** — matches the AI contract's `correct_meal` exactly:
-- Tap any detected item → inline edit (name, weight) → sends `{item_index, name, weight_g}`
-- "+ Add missed item" → sends `{item_index: null, name, weight_g}`
-- Show `needs_review: true` items with a small warning icon — this is the API telling you the dish wasn't matched in the nutrition database
-- After correction, **re-render the full card** with the new `MealAnalysis` returned (it's a complete recalculation, not a patch)
-
-**Timeouts:** meal analysis is a vision call — use a 90-second Dio timeout per the backend contract, and show the `LoadingView` with a rotating message so a 20-30 second wait doesn't feel broken.
+Disclaimer banner required on the result card. 90-second Dio timeout.
 
 ---
 
-## 8. Home Inventory Based Meal Suggestion
+## 8. Home Inventory Based Meal Suggestion — standalone quick-suggestion screen
 
-This is the one that maps cleverly onto the existing contract — no new backend work needed.
-
-```mermaid
-flowchart TD
-    A[Upload Fridge / Groceries Photo] --> B[Tap Analyze]
-    B --> C[POST /api/fridge/analyze]
-    C --> D{Success?}
-    D -->|NO_FOOD_DETECTED| E[Prompt retake photo]
-    D -->|200 OK| F[Show editable ingredient chips - FridgeInventory]
-    F --> G[User confirms / edits ingredients]
-    G --> H[Tap Suggest Meal Plan]
-    H --> I[POST /api/meal-plan/generate - family + inventory]
-    I --> J{Success?}
-    J -->|200 OK| K[Show plan as day cards, each item tagged: uses fridge items]
-    K --> L{Love It or Suggest Another Plan?}
-    L -->|Love It| M[Save, return to Dashboard]
-    L -->|Suggest Another| H
-```
-
-**Key detail your sketch called for** — "message their ingredients need to be used based on its life" (i.e., expiry/use-soon flagging): this comes from `InventoryItem.use_soon: bool` in the `FridgeInventory` response. Show a small "⏰ use soon" badge on those ingredient chips before the user confirms them, and visually prioritize `use_soon: true` items in the resulting plan if the AI surfaces them (check `DayPlan.notes` for this — confirm with AI teammate whether use-soon prioritization is reflected there).
-
-This screen is functionally: **"Weekly Meal Planner, but with `inventory` populated instead of `null`."** Consider sharing the day-card widget between this screen and §9 rather than building it twice.
-
----
-
-## 9. Weekly Meal Planner
+This screen stays exactly as previously confirmed — a fast, single fridge-only suggestion, separate from the full planning flow in §9.
 
 ```mermaid
 flowchart TD
-    A[Tab opened] --> B[Auto-call POST /api/meal-plan/generate - inventory: null]
+    A[Upload Fridge / Groceries Photo] --> B[POST /api/fridge/analyze]
     B --> C{Success?}
-    C -->|200 OK| D[7-Day plan as tabbed cards: Mon-Sun]
-    D --> E[Each card: Breakfast, Lunch, Dinner, Snack with ingredients]
-    E --> F{User action}
-    F -->|Prepare Grocery List| G[Navigate to Grocery List screen with this plan]
-    F -->|Suggest Another Plan| B
-    C -->|AI_BUSY| H[Retry banner - 90s timeout, this is the slowest call]
+    C -->|NO_FOOD_DETECTED| D[Prompt retake photo]
+    C -->|200 OK| E[Show ingredient chips, use_soon items flagged with a badge]
+    E --> F[User confirms / edits ingredients]
+    F --> G[Tap Suggest Meal Plan]
+    G --> H[POST /api/meal-plan/generate - family + inventory]
+    H --> I{Success?}
+    I -->|200 OK| J[Display meal plan with nutrients, as a card, using only these fridge ingredients]
+    I -->|AI_BUSY| K[Retry banner, 90s timeout]
+    J --> L{Love It or Suggest Another Plan?}
+    L -->|Suggest Another| G
+    L -->|Love It / Save| M[Save, return to Dashboard]
 ```
 
-Matches your sketch exactly: Day cards → Breakfast/Lunch/Dinner breakdown → "Prepare Grocery List" and "Suggest Another Plan" buttons. Note: **90-second timeout required** per backend contract — this is explicitly called out as the slowest endpoint.
+No navigation link to or from §9 — completely independent screen and state.
+
+---
+
+## 9. Meal Planner Tab — updated: optional photo step feeds the full 7-day plan and grocery list
+
+**Change in v1.4:** the Meal Planner Tab now opens with an **optional** fridge/grocery photo upload. If the user uploads a photo, the confirmed inventory carries through the *entire* flow — into the 7-day plan generation **and** into the grocery list generation at the end, so the final grocery list only lists items the family doesn't already have. If the user skips the photo, the flow behaves exactly as before (`inventory: null` throughout).
+
+```mermaid
+flowchart TD
+    A[Meal Planner Tab opened] --> B{Upload Fridge/Grocery Photo? - optional}
+    B -->|Skip| C[inventory = null]
+    B -->|Upload| D[POST /api/fridge/analyze]
+    D --> E{Success?}
+    E -->|NO_FOOD_DETECTED| F[Show message, allow retry or skip]
+    E -->|200 OK| G[Show ingredient chips, use_soon items flagged]
+    G --> H[User confirms / edits ingredients]
+    H --> I[inventory = confirmed FridgeInventory]
+    C --> J[Show family members with checkboxes]
+    I --> J
+    J --> K[Uncheck any member not available this week]
+    K --> L[Per-day meal type and cuisine selection, Day 1 to Day 7]
+    L --> M[Tap Generate Plan]
+    M --> N[POST /api/meal-plan/generate - family, inventory, day_preferences]
+    N --> O{Success?}
+    O -->|200 OK| P[7-day plan as day cards; items already in inventory tagged 'you have this']
+    O -->|AI_BUSY| Q[Retry banner, 90s timeout]
+    P --> R{User action}
+    R -->|Create New Plan| M
+    R -->|Love It / Save| S[Prepare Grocery List]
+    S --> T[POST /api/grocery-list/generate - family, plan, inventory, user_requirements]
+    T --> U[Grocery list shows only items not already at home]
+    U --> V[Love It / Save] --> W[Return to Dashboard]
+```
+
+### Step-by-step
+
+1. **Optional photo step:** "Upload Fridge/Grocery Photo (optional)" button at the top of the screen, clearly marked optional so it doesn't block users who just want a quick plan. If uploaded, run the same `analyze_fridge` → confirm/edit ingredient chips flow as §8 (including the use-soon badge), then carry the confirmed `FridgeInventory` forward. If skipped, `inventory` stays `null` for the rest of this flow.
+2. **Family member selection:** checklist from `GET /api/family/members`, default all checked. Unchecking excludes a member from the `family` array sent to the API.
+3. **Per-day meal type + cuisine selection:** one of the 11 meal types (§12) per day, plus optional cuisine. "Use same for all days" shortcut applies Day 1's choice to every day.
+4. **Generate plan:** call `generate_meal_plan` with whatever `inventory` was set in step 1 (`null` or confirmed). 90-second timeout.
+5. **Result:** day cards (Mon–Sun) with meals + nutrients. If inventory was provided, compare each day's `ingredients` list against the inventory items client-side and tag overlapping ones with a small "✓ you have this" badge — a nice touch that reinforces the waste-reduction story, no backend change needed for this tagging.
+6. **Regenerate / Create New Plan:** re-calls step 4 with the same selections.
+7. **Love It / Save → Prepare Grocery List:** navigate into grocery list generation, **passing the same `inventory` object forward** (don't discard it after plan generation). This is what makes the grocery list naturally exclude items already on hand — no new backend logic needed, since `generate_grocery_list(family, plan, inventory, user_requirements)` already accepts inventory in the existing contract and marks matched items by `source`.
+
+### 9.1 Finalized meal-plan request payload
+
+```json
+POST /api/meal-plan/generate
+{
+  "family": [ ...FamilyMember objects, filtered by availability... ],
+  "inventory": { ... } or null,
+  "day_preferences": {
+    "Monday":    { "meal_type": "VLML", "cuisine_preferences": ["indian"] },
+    "Tuesday":   { "meal_type": "HNML", "cuisine_preferences": ["chinese"] },
+    "Wednesday": { "meal_type": "VJML", "cuisine_preferences": [] },
+    "Thursday":  { "meal_type": "VGML", "cuisine_preferences": ["continental"] },
+    "Friday":    { "meal_type": "SFML", "cuisine_preferences": ["italian"] },
+    "Saturday":  { "meal_type": "HNML", "cuisine_preferences": [] },
+    "Sunday":    { "meal_type": "VLML", "cuisine_preferences": ["indian"] }
+  }
+}
+```
+
+> 🚧 **Confirm with AI/backend teammates before pointing this at the real API:**
+> 1. Does `generate_meal_plan` accept a new `day_preferences` parameter in this shape, or a different field name?
+> 2. Can the AI prompt correctly honor religious/dietary rules per code (Jain = no root vegetables, Kosher, Halal)?
+>
+> Build and test the full flow now against `MockApi`. Only flip `useMock = false` for this screen once both are confirmed.
+
+### 9.2 Grocery list follow-through — no new endpoint needed
+
+The existing contract already supports "only what's missing": `generate_grocery_list(family, plan, inventory, user_requirements)` takes the same `FridgeInventory` type used everywhere else, and the AI contract states grocery items are tagged by `source` (`missing_ingredient`, `preference`, `user_added`). **The only frontend responsibility is to keep the confirmed inventory object in state from step 1 through to this call** — don't let it get dropped when the screen transitions from plan view to grocery list view.
 
 ---
 
@@ -275,114 +318,124 @@ Matches your sketch exactly: Day cards → Breakfast/Lunch/Dinner breakdown → 
 
 ```mermaid
 flowchart TD
-    A[Entered from Weekly Planner or Inventory Suggestion] --> B[Optional: type extra items - user_requirements]
+    A[Entered from Meal Planner, with inventory carried forward if provided] --> B[Optional: type extra items]
     B --> C[Tap Generate Grocery List]
     C --> D[POST /api/grocery-list/generate - family, plan, inventory, user_requirements]
     D --> E{Success?}
     E -->|200 OK| F[List grouped by category, checkboxes]
-    F --> G[Items with source: user_added shown with a distinct tag]
-    F --> H[not_in_database items shown separately: Could not match in catalog]
-    E -->|Error| I[Show error + retry if retry:true]
-    G --> J[Tap Love It]
-    J --> K[Save, return to Dashboard]
+    F --> G[user_added items tagged distinctly]
+    F --> H[not_in_database items shown separately]
+    F --> I[missing_ingredient items are the ones actually needed to purchase]
+    E -->|Error| J[Error and retry if retry is true]
+    G --> K[Love It] --> L[Save, return to Dashboard]
 ```
 
-Add a small text field / chip-input above the Generate button for `user_requirements` (e.g. "Anything else to add? Almond milk"), per the contract's optional field. Checked/unchecked state stays **local only** (not sent back to the server).
+---
+
+## 11. Grocery Purchase Based Weekly Planner — Cut from MVP (confirmed)
+
+Decided out of scope. No screen, no route, no model needed. Revisit post-hackathon if time allows.
 
 ---
 
-## 11. 🚧 Grocery Purchase Based Weekly Planner — GAP, do not build yet
+## 12. Master Vocabulary & Validation Tables
 
-Your sketch (Image 5, bottom) shows: **Upload Grocery Purchase Bill → Analyze → Suggest 7-day weekly plan.**
+### Allergies — multi-select
+```
+ALLERGIES = ["milk", "peanut", "egg", "tree_nuts", "soy", "wheat", "shellfish", "fish"]
+```
+Plus free-text **"Other allergen(s)"**, comma-separated, hint *"e.g. sesame, mustard"* — parsed client-side and merged into `allergies`.
 
-This requires turning a **receipt/bill photo** into a structured ingredient list — parsing item names and quantities from a purchase receipt. This is a fundamentally different vision task from `analyze_fridge` (photo of items in a fridge) and is **not covered by any of the 6 documented AI functions**.
+### Health Conditions
+**Removed from the Profile form for MVP.** Field stays in the model as `healthConditions: []`.
 
-**Options to raise with your team today:**
-1. **Cut it from the MVP.** It wasn't in the original scope doc either (`Budget Optimization` was explicitly excluded, and this is adjacent). Given the Oct 8 deadline, this is the safest option — you already have Home Inventory Meal Suggestion covering a very similar "what do I have, what should I cook" use case.
-2. **Ask the AI engineer for a 7th function**, e.g. `analyze_grocery_bill(image_bytes, mime_type) -> FridgeInventory`, reusing the same `FridgeInventory` output shape as `analyze_fridge` so no new frontend model is needed — only a new backend endpoint (`POST /api/grocery-bill/analyze`) and a new AI function. This is a small ask if the AI engineer has time, since it reuses existing schemas.
-3. **Fake it for the demo only**: point the "Upload Bill" button at the existing `/api/fridge/analyze` endpoint (Gemini Vision may handle a receipt photo reasonably well even though it wasn't designed for it) — acceptable as a stretch-goal demo trick, **never** described as a real feature in your PPT if you do this.
+### Food Preferences — single select (Profile screen only)
+```
+FOOD_PREFERENCES = ["vegetarian", "non_vegetarian", "eggetarian", "vegan"]
+```
+Household-level default. Separate from the per-day meal type below.
 
-**Recommendation:** build every other screen first. Revisit this only if you're ahead of schedule after Oct 3 (Integration Day). Don't block on it.
+### Cuisine Preferences — multi-select
+```
+CUISINE_PREFERENCES = ["indian", "chinese", "italian", "continental"]
+```
+Used at the profile level and per day in the Meal Planner.
 
----
+### Meal Type — per-day selector, Meal Planner Tab only (§9)
 
-## 12. Master Validation Rules Table
+Not used on the Home Inventory Based Meal Suggestion screen (§8).
 
-| Field | Used on screens | Rule |
+| Code | Label | Description |
 |---|---|---|
-| Email | Login, Sign Up | RFC-valid format, required |
-| Password | Login, Sign Up | Min 8 chars, 1 letter, 1 number |
-| Name (user) | Sign Up | 2–50 chars, required |
-| Name (family member) | Profile Creation | 2–50 chars, required |
-| Age | Profile Creation | Integer, 0–120, required |
-| Gender | Profile Creation | Required, single select |
-| Allergies / Conditions / Food prefs / Cuisine prefs | Profile Creation | Optional multi-select, **must use a shared vocabulary list agreed with backend/AI** (exact lowercase strings, e.g. `"vegetarian"`, `"peanut"`, `"diabetes"`) — casing mismatches will silently break allergy-safety filtering server-side |
-| Image upload (all analyzer screens) | Meal/Fridge/Bill analysis | JPEG/PNG/WebP, max 5 MB, client-compressed to `maxWidth: 1024, imageQuality: 80` before upload |
-| Notes / user_requirements | Meal Analysis, Grocery List | Optional free text, max ~200 chars, plain text only |
+| `MOML` | Muslim Meal | Prepared to Islamic Halal standards; all Halal-certified ingredients |
+| `HNML` | Hindu Non-Vegetarian Meal | Indian-style, no beef or pork |
+| `VJML` | Vegetarian Jain Meal | No root vegetables, strictly plant-based |
+| `VLML` | Vegetarian Lacto-Ovo Meal | Vegetarian with eggs and dairy |
+| `VGML` | Vegan Meal | Fully plant-based, no animal products |
+| `KSML` | Kosher Meal | Prepared to Jewish dietary laws |
+| `FPML` | Fruit Platter Meal | Fresh seasonal fruit only |
+| `SFML` | Seafood Meal | Seafood-based dishes throughout |
+| `AVML` | Asian Vegetarian Meal | Indian-style vegetarian |
+| `RVML` | Raw Vegetarian Meal | Uncooked plant-based ingredients |
+| `VOML` | Vegetarian Oriental Meal | Asian-style vegetarian |
 
-**Get the exact allergy/condition/food-preference/cuisine string lists from your AI teammate before building the chip UIs** — this is the single most important shared-vocabulary item, since mismatched strings mean the allergy-safety filter (a hard safety requirement per the AI contract) won't recognize what the user selected.
+UI shows the label and description; the code is sent as `meal_type`. Default: `VLML`.
+
+### Image upload rules
+JPEG/PNG/WebP, max 5 MB, client-compressed to `maxWidth: 1024, imageQuality: 80`.
 
 ---
 
-## 13. Success / Failure Handling Pattern (applies to every screen)
-
-Build **one shared error-handling pattern**, not one per screen, using the backend's documented error envelope:
-
-```json
-{ "error": { "code": "NO_FOOD_DETECTED", "message": "...", "retry": false } }
-```
+## 13. Success / Failure Handling Pattern
 
 | Backend `code` | UI behavior |
 |---|---|
-| `INVALID_IMAGE` | Show `e.message` in a dialog. No retry button. Suggest re-picking an image. |
-| `INVALID_INPUT` | Show `e.message` near the offending field if identifiable, else as a banner. No retry button. |
-| `NO_FOOD_DETECTED` | Show `e.message`, prompt to retake/reselect photo. No retry button (retrying the *same* image won't help). |
-| `AI_BUSY` | Show a retry banner with the message, **with** a retry button — consider auto-retry once after a short delay. |
-| `AI_INVALID_RESPONSE` | Show retry button. |
-| `INTERNAL` | Generic "Something went wrong" message, no retry button, offer to go back. |
-| Network/timeout (no server response) | Generic connectivity message + retry button. |
+| `INVALID_IMAGE` | Dialog, no retry |
+| `INVALID_INPUT` | Inline/banner error, no retry |
+| `NO_FOOD_DETECTED` | Prompt retake, no retry |
+| `AI_BUSY` | Retry banner, consider one auto-retry |
+| `AI_INVALID_RESPONSE` | Retry banner |
+| `INTERNAL` | Generic error, no retry |
+| `INVALID_CREDENTIALS` (proposed, login) | "Incorrect email or password", no retry |
+| Network/timeout | Generic connectivity message + retry |
 
-Every result screen ends with:
-1. A **"Love It" / Save** action, and
-2. The `DisclaimerBanner` ("AI-generated suggestions, not medical advice") wherever nutrition or health content is shown.
-
----
-
-## 14. Security Checklist (frontend responsibilities)
-
-- [ ] Auth token stored via `flutter_secure_storage`, never `SharedPreferences`
-- [ ] All API calls over HTTPS in release builds; debug-only HTTP guarded by `kReleaseMode`
-- [ ] `Authorization: Bearer <token>` attached via a single Dio interceptor, not per-call
-- [ ] Global 401 interceptor clears token and routes to `/login`
-- [ ] No PII (email, password, health conditions) ever written to `print()`/logs in release builds
-- [ ] Images sent as raw multipart bytes, never base64-encoded (per backend contract)
-- [ ] Client-side image compression before upload (max 1024px width, 80% quality) — reduces both upload time and exposure of unnecessarily large personal photos
-- [ ] Gemini API key and Supabase service keys are **never** referenced anywhere in Flutter code — they live only on the backend
-- [ ] Family health data (allergies, conditions) only sent to your own backend, never to any third-party analytics SDK if one is added later
+Every result screen: **Love It / Save** action + `DisclaimerBanner` wherever nutrition content is shown.
 
 ---
 
-## 15. Design Direction — Age-Inclusive, Food/Family Theme
+## 14. Security Checklist
 
-Building on the accessibility-first theme already in `lib/core/theme.dart`:
-
-- **Color palette:** warm greens (health/freshness) + a secondary warm orange/terracotta (food warmth) — avoid clinical blue/white hospital tones.
-- **Imagery:** rounded cards, soft shadows, food photography or simple flat food iconography (a plate, a fridge, a basket) rather than abstract icons — this reads instantly across ages and literacy levels.
-- **Typography:** 16sp+ body text minimum (already set), generous line height, no all-caps labels (harder for older readers).
-- **Family framing:** on the Profile Creation screen, consider a simple visual family-member list with age-appropriate icons (child/adult/senior silhouette) next to each name — makes the "who am I planning for" mental model instant, even for non-technical users.
-- **Motion:** keep transitions short and simple (200–300ms) — avoid flashy animations that can disorient older users or feel unnecessary to children waiting to see food results.
-- **Every primary action** (Analyze, Save, Love It, Generate) is a large, high-contrast, icon+label button — never icon-only, per the accessibility table from earlier planning.
-
----
-
-## 16. Open Questions for the Team (send today)
-
-1. Is there a documented `POST /auth/login` endpoint, and what's its response shape (token, expiry, refresh token)?
-2. Which endpoint saves a `FamilyMember` to the database? Not shown in the current backend contract.
-3. Is the "Grocery Purchase Based Weekly Planner" (bill upload) in scope for the MVP, or cut per §11? If in scope, who builds `analyze_grocery_bill`?
-4. What is the exact shared vocabulary list (strings) for allergies, health conditions, food preferences, and cuisine preferences?
-5. Does `DayPlan.notes` reflect use-soon/expiring ingredient prioritization, or is that only inferred client-side from the `FridgeInventory` passed in?
+- [ ] Token via `flutter_secure_storage`
+- [ ] HTTPS only in release builds
+- [ ] Auth header via single Dio interceptor
+- [ ] Global 401 interceptor → clear token → `/login`
+- [ ] No PII in logs
+- [ ] Images as raw multipart bytes, not base64
+- [ ] Client-side image compression before upload
+- [ ] No API keys anywhere in Flutter code
 
 ---
 
-*This document should be updated whenever a screen's flow or a backend/AI contract field changes. Keep it in `docs/frontend-flow-and-business-logic.md` and reference it in PR descriptions for any screen work.*
+## 15. Design Direction
+
+Warm greens + terracotta, rounded cards, food iconography, 16sp+ text, large icon+label buttons, short transitions, age-appropriate family member icons on the Profile screen. Meal-type picker (§9): bottom-sheet radio list with label + description, not inline chips. The optional photo upload button in §9 should read clearly as optional (e.g. "Upload Fridge Photo (optional)") so it doesn't feel like a blocking requirement.
+
+---
+
+## 16. Open Questions for the Team
+
+1. ~~Login endpoint~~ — **resolved**: proposed contract in §4.2, awaiting backend build.
+2. ~~Family member save endpoint~~ — **resolved**, see §5.
+3. ~~Grocery bill planner scope~~ — **resolved**: cut from MVP.
+4. ~~Vocabulary lists~~ — **resolved**, see §12.
+5. ~~Use-soon flow~~ — **resolved**, see §8.
+6. ~~Per-day preference structure~~ — **resolved**, see §9.1.
+7. ~~Home Inventory Suggestion vs Meal Planner relationship~~ — **resolved**: both exist, §9's photo step is optional and feeds a full plan + grocery list; §8 remains a separate quick fridge-only suggestion. UX distinction flagged in §2 for team review.
+8. **Open:** Does `generate_meal_plan` accept the `day_preferences` field as shaped in §9.1, and under what parameter name?
+9. **Open:** Can the AI prompt reliably honor Jain/Kosher/Halal-specific rules per meal type?
+10. **Open:** Where is a generated `WeeklyPlan` saved when the user taps "Love It" on either §8 or §9 — a dedicated save endpoint, or does generation persist automatically?
+11. **Open:** How should free-text "other allergens" be matched during the backend's allergy-safety filter?
+
+---
+
+*Update this document whenever a screen's flow or a backend/AI contract field changes. Reference it in PR descriptions for any screen work.*
