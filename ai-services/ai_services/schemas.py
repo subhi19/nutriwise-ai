@@ -23,9 +23,15 @@ class FamilyMember(BaseModel):
     age: int
     gender: str
     allergies: list[str] = []            # e.g. "milk", "peanut", "egg"
-    health_conditions: list[str] = []    # e.g. "diabetes", "hypertension"
     food_preferences: list[str] = []     # e.g. "vegetarian"
     cuisine_preferences: list[str] = []  # e.g. "Indian", "Italian", "Chinese"; empty = any cuisine
+
+
+class DayPreference(BaseModel):
+    day: str                          # "Monday" ... "Sunday"
+    meal_type: Optional[str] = None   # one of the fixed meal type options (see frontend's meal type list)
+    cuisine: Optional[str] = None     # optional cuisine override for this day only
+    preference: Optional[str] = None  # free text, e.g. "light dinner, low oil"; combined with the two fields above if both given
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +87,7 @@ class InventoryItem(BaseModel):
     name: str
     quantity: Optional[str] = None      # e.g. "6", "1 bunch"; may be null
     use_soon: bool = False
+    expiry_estimate: Optional[str] = None  # e.g. "Use within 3 days", "About a week"
 
 
 class FridgeInventory(BaseModel):
