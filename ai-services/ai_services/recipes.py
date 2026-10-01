@@ -1,21 +1,34 @@
 """
 recipes.py
 
-suggest_recipes() takes the fridge inventory (from fridge_analyzer.py) and
-the family's preferences, and generates recipe ideas — prioritizing
-ingredients that are about to expire, so nothing goes to waste.
+suggest_recipes() is what runs behind the Fridge Analyzer tab's
+"Suggest Meal Plan" button. It takes the confirmed fridge inventory and:
 
-No image involved here, no database lookup either — this is a single
-Gemini Flash text call. The fridge inventory already has everything
-needed as input.
+  1. Asks Gemini for recipes using ONLY those ingredients (plus common
+     pantry staples like salt/oil/spices, which don't need tracking).
+  2. Calculates REAL nutrients for each recipe, using the same
+     database-first approach as meal_analyzer.py and meal_plan.py:
+     Gemini names the ingredient + weight, the database supplies the
+     real numbers, and only ingredients missing from the database fall
+     back to a Gemini estimate.
+
+This is different from generate_meal_plan() in two ways:
+  - It must use ONLY the fridge's ingredients (not freely add extras)
+  - It's a single result (one or a few recipe cards), not a 7-day plan
 """
 
 import json
 from google.genai import types
 
-from meal_analyzer import client, MODEL_NAME
+from gemini_client import client, MODEL_NAME
 from retry_utils import call_with_retry
-from schemas import FridgeInventory, RecipeSuggestions, Recipe, FamilyMember
+from nutrition_repo import search_food
+from calculator import calculate_nutrients, add_totals
+from meal_analyzer import estimate_nutrients_with_gemini  # same fallback used everywhere else
+from schemas import (
+    FridgeInventory, RecipeSuggestions, Recipe, FamilyMember,
+    MealIngredient, NutrientTotals,
+)
 
 
 def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> RecipeSuggestions:
@@ -23,8 +36,6 @@ def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> R
     expiring = [item.name for item in inventory.items if item.use_soon]
     all_items = [item.name for item in inventory.items]
 
-    # Collect allergies and food preferences across the whole family,
-    # so a suggested recipe doesn't include something someone can't eat
     all_allergies = set()
     all_preferences = set()
     for member in family:
@@ -39,18 +50,23 @@ These items are close to spoiling and should be prioritized: {', '.join(expiring
 Family restrictions — avoid these allergens completely: {', '.join(all_allergies) or 'none'}
 Food preferences to respect: {', '.join(all_preferences) or 'none'}
 
-Suggest 3 simple recipes that use these ingredients, prioritizing the
-items close to spoiling. Prefer recipes using mostly what's already
-available; a few common pantry staples (salt, oil, spices) are fine to
-assume. Give short, clear steps.
+Suggest 3 simple recipes using ONLY the ingredients listed above. Do NOT
+require any ingredient that is not in that list, EXCEPT common pantry
+staples (salt, oil, basic spices, water) which can be assumed available —
+list those separately as "pantry_staples", not as tracked ingredients.
+
+For each tracked ingredient (from the fridge list) used in a recipe, give
+an estimated weight in grams for that recipe — this is needed to calculate
+real nutrition, so always include weight_g. Do NOT estimate calories or
+nutrients yourself.
 
 Return JSON only, no extra text, in this format:
 {{
   "recipes": [
     {{
       "name": "",
-      "ingredients_from_fridge": [],
-      "extra_ingredients": [],
+      "ingredients": [{{"name": "", "weight_g": 0}}],
+      "pantry_staples": [],
       "steps": []
     }}
   ]
@@ -65,7 +81,42 @@ Return JSON only, no extra text, in this format:
         return json.loads(response.text)
 
     data = call_with_retry(make_request, label="Gemini (recipes)")
-    recipes = [Recipe(**r) for r in data["recipes"]]
+
+    recipes = []
+    for raw in data["recipes"]:
+        ingredients = []
+        unmatched = []
+
+        for raw_ing in raw["ingredients"]:
+            name = raw_ing["name"]
+            weight_g = raw_ing["weight_g"]
+            food = search_food(name)
+
+            if food:
+                nutrients = calculate_nutrients(food, weight_g)
+                ingredients.append(MealIngredient(
+                    name=food["name"], food_id=food["id"], weight_g=weight_g,
+                    nutrients=NutrientTotals(**nutrients),
+                ))
+            else:
+                estimated = estimate_nutrients_with_gemini(name, weight_g)
+                ingredients.append(MealIngredient(
+                    name=name, food_id=None, weight_g=weight_g,
+                    nutrients=NutrientTotals(**estimated),
+                ))
+                unmatched.append(name)
+
+        totals = add_totals([ing.nutrients.model_dump() for ing in ingredients])
+
+        recipes.append(Recipe(
+            name=raw["name"],
+            ingredients=ingredients,
+            pantry_staples=raw.get("pantry_staples", []),
+            steps=raw["steps"],
+            total_nutrients=NutrientTotals(**totals),
+            unmatched_ingredients=unmatched,
+        ))
+
     return RecipeSuggestions(recipes=recipes)
 
 
@@ -75,27 +126,28 @@ Return JSON only, no extra text, in this format:
 if __name__ == "__main__":
     from schemas import InventoryItem
 
-    # A fake fridge inventory, so you don't need to run fridge_analyzer.py
-    # first just to test this
     fake_inventory = FridgeInventory(items=[
         InventoryItem(name="Tomatoes", quantity="4", use_soon=False),
         InventoryItem(name="Spinach", quantity="1 bunch", use_soon=True, expiry_estimate="Use within 2 days"),
         InventoryItem(name="Eggs", quantity="6", use_soon=False),
-        InventoryItem(name="Milk", quantity="half full", use_soon=True, expiry_estimate="Use within 3 days"),
-        InventoryItem(name="Carrots", quantity="5", use_soon=False),
+        InventoryItem(name="Paneer", quantity="200g", use_soon=False),
     ])
 
     fake_family = [
-        FamilyMember(name="Test User", age=30, gender="female", allergies=[], food_preferences=["vegetarian"])
+        FamilyMember(name="Test User", age=30, gender="female", food_preferences=["vegetarian"])
     ]
 
     result = suggest_recipes(fake_inventory, fake_family)
 
-    print("--- Suggested recipes ---")
+    print("--- Suggested recipes (fridge-only, with real nutrients) ---")
     for recipe in result.recipes:
-        print(f"\n{recipe.name}")
-        print("  Uses from fridge:", ", ".join(recipe.ingredients_from_fridge))
-        if recipe.extra_ingredients:
-            print("  Also needs:", ", ".join(recipe.extra_ingredients))
+        print(f"\n{recipe.name}  —  total: {recipe.total_nutrients.calories} kcal, "
+              f"protein: {recipe.total_nutrients.protein_g}g")
+        for ing in recipe.ingredients:
+            print(f"  - {ing.name}: {ing.weight_g}g, {ing.nutrients.calories} kcal")
+        if recipe.pantry_staples:
+            print(f"  Pantry staples: {', '.join(recipe.pantry_staples)}")
+        if recipe.unmatched_ingredients:
+            print(f"  (used Gemini fallback for: {', '.join(recipe.unmatched_ingredients)})")
         for i, step in enumerate(recipe.steps, 1):
             print(f"  {i}. {step}")

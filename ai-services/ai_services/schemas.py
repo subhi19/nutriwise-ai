@@ -50,6 +50,16 @@ class NutrientTotals(BaseModel):
     vitamin_c_mg: float = 0
 
 
+class MealIngredient(BaseModel):
+    """One ingredient with its real, calculated nutrition — used inside
+    both a meal plan's PlannedMeal and a Recipe, so a single piece of
+    code can build either one the same way."""
+    name: str
+    food_id: Optional[int] = None       # null if not matched in the database
+    weight_g: float
+    nutrients: NutrientTotals
+
+
 class MealItem(BaseModel):
     name: str
     food_id: Optional[int] = None       # null if not matched in the database
@@ -96,9 +106,11 @@ class FridgeInventory(BaseModel):
 
 class Recipe(BaseModel):
     name: str
-    ingredients_from_fridge: list[str]
-    extra_ingredients: list[str] = []
+    ingredients: list[MealIngredient]    # fridge ingredients used, each with real calculated nutrition
+    pantry_staples: list[str] = []       # salt, oil, common spices — assumed available, not nutrition-tracked
     steps: list[str]
+    total_nutrients: NutrientTotals
+    unmatched_ingredients: list[str] = []  # ingredients not found in our database
 
 
 class RecipeSuggestions(BaseModel):
@@ -111,8 +123,9 @@ class RecipeSuggestions(BaseModel):
 
 class PlannedMeal(BaseModel):
     name: str
-    ingredients: list[str]
+    ingredients: list[MealIngredient]    # each with real calculated nutrition
     notes: Optional[str] = None
+    nutrients: NutrientTotals            # total for this one meal
 
 
 class DayPlan(BaseModel):
@@ -121,7 +134,9 @@ class DayPlan(BaseModel):
     lunch: PlannedMeal
     dinner: PlannedMeal
     snack: Optional[PlannedMeal] = None
-    ingredients: list[str] = []         # all ingredients for the day, combined, without duplicates
+    ingredients: list[str] = []         # all ingredient NAMES for the day, combined, no duplicates (still used by grocery list)
+    nutrients: NutrientTotals           # total for the whole day
+    unmatched_ingredients: list[str] = []  # ingredients this day not found in our database
 
 
 class WeeklyPlan(BaseModel):
