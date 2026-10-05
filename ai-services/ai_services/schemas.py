@@ -23,9 +23,20 @@ class FamilyMember(BaseModel):
     age: int
     gender: str
     allergies: list[str] = []            # e.g. "milk", "peanut", "egg"
-    health_conditions: list[str] = []    # e.g. "diabetes", "hypertension"
+    anyother_specific_allergy: list[str] = []
     food_preferences: list[str] = []     # e.g. "vegetarian"
-    cuisine_preferences: list[str] = []  # e.g. "Indian", "Italian", "Chinese"; empty = any cuisine
+    # e.g. "Indian", "Italian", "Chinese"; empty = any cuisine
+    cuisine_preferences: list[str] = []
+
+
+class DayPreference(BaseModel):
+    day: str                          # "Monday" ... "Sunday"
+    # one of the fixed meal type options (see frontend's meal type list)
+    meal_type: Optional[str] = None
+    # optional cuisine override for this day only
+    cuisine: Optional[str] = None
+    # free text, e.g. "light dinner, low oil"; combined with the two fields above if both given
+    preference: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -44,28 +55,43 @@ class NutrientTotals(BaseModel):
     vitamin_c_mg: float = 0
 
 
+class MealIngredient(BaseModel):
+    """One ingredient with its real, calculated nutrition — used inside
+    both a meal plan's PlannedMeal and a Recipe, so a single piece of
+    code can build either one the same way."""
+    name: str
+    food_id: Optional[int] = None       # null if not matched in the database
+    weight_g: float
+    nutrients: NutrientTotals
+
+
 class MealItem(BaseModel):
     name: str
     food_id: Optional[int] = None       # null if not matched in the database
     weight_g: float
     nutrients: NutrientTotals
     confidence: Confidence
-    needs_review: bool = False          # true if confidence is low or the food was not matched
+    # true if confidence is low or the food was not matched
+    needs_review: bool = False
     user_corrected: bool = False        # true if the name was typed by the user
 
 
 class MealAnalysis(BaseModel):
     items: list[MealItem]
     total: NutrientTotals
-    missing_nutrients: list[str]        # labels: Protein, Fiber, Iron, Calcium, Vitamin A, Vitamin C
+    # labels: Protein, Fiber, Iron, Calcium, Vitamin A, Vitamin C
+    missing_nutrients: list[str]
     suggestions: list[str]
-    unmatched_items: list[str] = []     # foods seen or typed but not in the database
+    # foods seen or typed but not in the database
+    unmatched_items: list[str] = []
 
 
 class ItemCorrection(BaseModel):
-    item_index: Optional[int] = None    # position in MealAnalysis.items; null = add a dish that was missed
+    # position in MealAnalysis.items; null = add a dish that was missed
+    item_index: Optional[int] = None
     name: str                           # dish name typed by the user
-    weight_g: Optional[float] = None    # optional; null keeps the old weight (replace) or uses a standard serving (add)
+    # optional; null keeps the old weight (replace) or uses a standard serving (add)
+    weight_g: Optional[float] = None
 
 
 class MealCorrectionRequest(BaseModel):
@@ -81,6 +107,8 @@ class InventoryItem(BaseModel):
     name: str
     quantity: Optional[str] = None      # e.g. "6", "1 bunch"; may be null
     use_soon: bool = False
+    # e.g. "Use within 3 days", "About a week"
+    expiry_estimate: Optional[str] = None
 
 
 class FridgeInventory(BaseModel):
@@ -89,9 +117,14 @@ class FridgeInventory(BaseModel):
 
 class Recipe(BaseModel):
     name: str
-    ingredients_from_fridge: list[str]
-    extra_ingredients: list[str] = []
+    # fridge ingredients used, each with real calculated nutrition
+    ingredients: list[MealIngredient]
+    # salt, oil, common spices — assumed available, not nutrition-tracked
+    pantry_staples: list[str] = []
     steps: list[str]
+    total_nutrients: NutrientTotals
+    # ingredients not found in our database
+    unmatched_ingredients: list[str] = []
 
 
 class RecipeSuggestions(BaseModel):
@@ -104,8 +137,9 @@ class RecipeSuggestions(BaseModel):
 
 class PlannedMeal(BaseModel):
     name: str
-    ingredients: list[str]
+    ingredients: list[MealIngredient]    # each with real calculated nutrition
     notes: Optional[str] = None
+    nutrients: NutrientTotals            # total for this one meal
 
 
 class DayPlan(BaseModel):
@@ -114,7 +148,11 @@ class DayPlan(BaseModel):
     lunch: PlannedMeal
     dinner: PlannedMeal
     snack: Optional[PlannedMeal] = None
-    ingredients: list[str] = []         # all ingredients for the day, combined, without duplicates
+    # all ingredient NAMES for the day, combined, no duplicates (still used by grocery list)
+    ingredients: list[str] = []
+    nutrients: NutrientTotals           # total for the whole day
+    # ingredients this day not found in our database
+    unmatched_ingredients: list[str] = []
 
 
 class WeeklyPlan(BaseModel):
