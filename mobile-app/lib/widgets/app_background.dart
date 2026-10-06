@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
+import 'food_doodles.dart';
 
 class AppBackground extends StatelessWidget {
   final Widget child;
-  const AppBackground({super.key, required this.child});
+  final bool showDoodles;
+  const AppBackground({super.key, required this.child, this.showDoodles = true});
 
   @override
   Widget build(BuildContext context) {
@@ -14,6 +16,7 @@ class AppBackground extends StatelessWidget {
           Positioned(top: -60, left: -60, child: _blob(AppColors.primary, 220)),
           Positioned(top: 100, right: -80, child: _blob(AppColors.tertiary, 200)),
           Positioned(bottom: -70, left: -40, child: _blob(AppColors.secondary, 220)),
+          if (showDoodles) const FoodDoodles(),
           child,
         ],
       ),

@@ -97,7 +97,7 @@ class _EmptyState extends StatelessWidget {
                 color: AppColors.primaryLight.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Center(child: Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 52))),
+              child: const Center(child: Text('🏠', style: TextStyle(fontSize: 52))),
             ),
             const SizedBox(height: 20),
             Text('No family members yet',
@@ -262,6 +262,7 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
       _gender = m.gender;
       _foodPref = m.foodPreference;
       _allergies.addAll(m.allergies.where((a) => AppVocab.allergies.contains(a)));
+      _otherAllergyCtrl.text = m.otherAllergies.join(', ');
       if (m.cuisinePreferences.isEmpty) {
         _cuisines.add('any');
       } else {
@@ -316,6 +317,7 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
       child: SingleChildScrollView(
         child: Form(
           key: _formKey,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -460,50 +462,54 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
   }
 
   Future<void> _save() async {
-    setState(() => _submitted = true);
+  setState(() => _submitted = true);
 
-    final formValid = _formKey.currentState!.validate();
-    final allValid = formValid && _gender != null && _foodPref != null && _cuisines.isNotEmpty;
-    if (!allValid) return;
+  final formValid = _formKey.currentState!.validate();
+  final allValid = formValid && _gender != null && _foodPref != null && _cuisines.isNotEmpty;
+  if (!allValid) return;
 
-    setState(() => _saving = true);
+  setState(() => _saving = true);
 
-    final otherAllergies = _otherAllergyCtrl.text
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .where((s) => s.isNotEmpty);
+  final otherAllergies = _otherAllergyCtrl.text
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .where((s) => s.isNotEmpty)
+      .toList();
 
-    final cuisinesToSend = _cuisines.contains('any') ? <String>[] : _cuisines.toList();
+  final cuisinesToSend = _cuisines.contains('any') ? <String>[] : _cuisines.toList();
 
-    final member = FamilyMember(
-      id: widget.existing?.id,
-      name: _nameCtrl.text.trim(),
-      age: int.parse(_ageCtrl.text.trim()),
-      gender: _gender!,
-      allergies: {..._allergies, ...otherAllergies}.toList(),
-      foodPreference: _foodPref!,
-      cuisinePreferences: cuisinesToSend,
-    );
+  final member = FamilyMember(
+    id: widget.existing?.id,
+    name: _nameCtrl.text.trim(),
+    age: int.parse(_ageCtrl.text.trim()),
+    gender: _gender!,
+    allergies: _allergies.toList(),       // chip selections only
+    otherAllergies: otherAllergies,       // free-text field -> anyother_specific_allergy
+    foodPreference: _foodPref!,
+    cuisinePreferences: cuisinesToSend,
+  );
 
-    try {
-      final api = ref.read(apiProvider);
-      if (widget.existing == null) {
-        await api.createMember(demoUserId, member);
-      } else {
-        await api.updateMember(widget.existing!.id!, member);
-      }
-      ref.invalidate(membersProvider);
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+  try {
+    final auth = ref.read(authProvider);
+    final userId = auth?.userId ?? demoUserId;
+    final api = ref.read(apiProvider);
+    if (widget.existing == null) {
+      await api.createMember(userId, member);
+    } else {
+      await api.updateMember(widget.existing!.id!, member);
     }
+    ref.invalidate(membersProvider);
+    if (mounted) Navigator.pop(context);
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save: $e')),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _saving = false);
   }
+}
 }
 
 class _FieldError extends StatelessWidget {

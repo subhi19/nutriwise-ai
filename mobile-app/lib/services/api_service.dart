@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../models/auth_session.dart';
 import '../models/family_member.dart';
 
 // ---------- Error handling ----------
@@ -9,7 +10,8 @@ class ApiException implements Exception {
   final bool retry;
   ApiException({required this.code, required this.message, required this.retry});
 
-  factory ApiException.fromResponse(Map<String, dynamic> body) {
+  // AI-pipeline envelope: { "error": { "code", "message", "retry" } }
+  factory ApiException.fromAiEnvelope(Map<String, dynamic> body) {
     final err = body['error'];
     return ApiException(
       code: err['code'] ?? 'INTERNAL',
@@ -18,6 +20,10 @@ class ApiException implements Exception {
     );
   }
 
+  // Standard FastAPI auth envelope: { "detail": "..." }
+  factory ApiException.fromDetail(String detail) =>
+      ApiException(code: 'AUTH_ERROR', message: detail, retry: false);
+
   @override
   String toString() => message;
 }
@@ -25,26 +31,45 @@ class ApiException implements Exception {
 // ---------- Abstract interface ----------
 
 abstract class NutriApi {
-  Future<List<FamilyMember>> getMembers(String userId);
-  Future<FamilyMember> createMember(String userId, FamilyMember member);
+  Future<AuthSession> login(String email, String password);
+  Future<void> register(String name, String email, String password);
+  Future<List<FamilyMember>> getMembers(int userId);
+  Future<FamilyMember> createMember(int userId, FamilyMember member);
   Future<FamilyMember> updateMember(String memberId, FamilyMember member);
   Future<void> deleteMember(String memberId);
+  Future<void> forgotPassword(String email);
 }
 
-// ---------- Mock implementation (use this today) ----------
+// ---------- Mock implementation ----------
 
 class MockApi implements NutriApi {
   final List<FamilyMember> _members = [];
   int _nextId = 1;
 
   @override
-  Future<List<FamilyMember>> getMembers(String userId) async {
+  Future<AuthSession> login(String email, String password) async {
+    await Future.delayed(const Duration(milliseconds: 500));
+    return AuthSession(
+      accessToken: 'mock-token',
+      userId: 1,
+      name: 'Mock User',
+      expiresAt: DateTime.now().add(const Duration(hours: 24)),
+    );
+  }
+
+  @override
+  Future<void> register(String name, String email, String password) async {
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+
+  @override
+  Future<List<FamilyMember>> getMembers(int userId) async {
     await Future.delayed(const Duration(milliseconds: 400));
     return List.of(_members);
   }
 
   @override
-  Future<FamilyMember> createMember(String userId, FamilyMember member) async {
+  Future<FamilyMember> createMember(int userId, FamilyMember member) async {
     await Future.delayed(const Duration(milliseconds: 400));
     final saved = member.copyWith(id: 'mock-${_nextId++}');
     _members.add(saved);
@@ -56,9 +81,7 @@ class MockApi implements NutriApi {
     await Future.delayed(const Duration(milliseconds: 400));
     final index = _members.indexWhere((m) => m.id == memberId);
     final updated = member.copyWith(id: memberId);
-    if (index != -1) {
-      _members[index] = updated;
-    }
+    if (index != -1) _members[index] = updated;
     return updated;
   }
 
@@ -67,9 +90,14 @@ class MockApi implements NutriApi {
     await Future.delayed(const Duration(milliseconds: 300));
     _members.removeWhere((m) => m.id == memberId);
   }
+
+  @override
+  Future<void> forgotPassword(String email) async {
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
 }
 
-// ---------- Real implementation (switch to this once backend is live) ----------
+// ---------- Real implementation ----------
 
 class RealApi implements NutriApi {
   final Dio _dio = Dio(BaseOptions(
@@ -79,9 +107,10 @@ class RealApi implements NutriApi {
   ));
 
   Never _handleError(DioException e) {
-    if (e.response?.data is Map<String, dynamic> &&
-        (e.response!.data as Map).containsKey('error')) {
-      throw ApiException.fromResponse(e.response!.data);
+    final data = e.response?.data;
+    if (data is Map<String, dynamic>) {
+      if (data.containsKey('error')) throw ApiException.fromAiEnvelope(data);
+      if (data.containsKey('detail')) throw ApiException.fromDetail(data['detail'].toString());
     }
     throw ApiException(
       code: 'INTERNAL',
@@ -91,10 +120,28 @@ class RealApi implements NutriApi {
   }
 
   @override
-  Future<List<FamilyMember>> getMembers(String userId) async {
+  Future<AuthSession> login(String email, String password) async {
     try {
-      final res = await _dio.get('/api/family/members',
-          queryParameters: {'user_id': userId});
+      final res = await _dio.post('/auth/login', data: {'email': email, 'password': password});
+      return AuthSession.fromLoginResponse(res.data);
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<void> register(String name, String email, String password) async {
+    try {
+      await _dio.post('/auth/register', data: {'name': name, 'email': email, 'password': password});
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<List<FamilyMember>> getMembers(int userId) async {
+    try {
+      final res = await _dio.get('/api/family/members', queryParameters: {'user_id': userId});
       return (res.data as List).map((e) => FamilyMember.fromJson(e)).toList();
     } on DioException catch (e) {
       _handleError(e);
@@ -102,7 +149,7 @@ class RealApi implements NutriApi {
   }
 
   @override
-  Future<FamilyMember> createMember(String userId, FamilyMember member) async {
+  Future<FamilyMember> createMember(int userId, FamilyMember member) async {
     try {
       final res = await _dio.post('/api/family/members',
           queryParameters: {'user_id': userId}, data: member.toJson());
@@ -126,6 +173,16 @@ class RealApi implements NutriApi {
   Future<void> deleteMember(String memberId) async {
     try {
       await _dio.delete('/api/family/members/$memberId');
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<void> forgotPassword(String email) async {
+    try {
+      // TODO: confirm this endpoint with backend — not yet documented in v2.0 contract.
+      await _dio.post('/auth/forgot-password', data: {'email': email});
     } on DioException catch (e) {
       _handleError(e);
     }

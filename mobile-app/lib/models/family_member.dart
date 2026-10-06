@@ -4,8 +4,8 @@ class FamilyMember {
   final int age;
   final String gender;
   final List<String> allergies;
-  final List<String> healthConditions; // always empty for MVP, kept for schema compatibility
-  final String foodPreference; // single value: vegetarian | non_vegetarian | eggetarian | vegan
+  final List<String> otherAllergies; // maps to anyother_specific_allergy
+  final String foodPreference;
   final List<String> cuisinePreferences;
 
   FamilyMember({
@@ -14,7 +14,7 @@ class FamilyMember {
     required this.age,
     required this.gender,
     this.allergies = const [],
-    this.healthConditions = const [],
+    this.otherAllergies = const [],
     required this.foodPreference,
     this.cuisinePreferences = const [],
   });
@@ -25,7 +25,7 @@ class FamilyMember {
         age: j['age'],
         gender: j['gender'],
         allergies: List<String>.from(j['allergies'] ?? []),
-        healthConditions: List<String>.from(j['health_conditions'] ?? []),
+        otherAllergies: List<String>.from(j['anyother_specific_allergy'] ?? []),
         foodPreference: (j['food_preferences'] as List?)?.isNotEmpty == true
             ? j['food_preferences'][0]
             : 'vegetarian',
@@ -37,8 +37,8 @@ class FamilyMember {
         'age': age,
         'gender': gender,
         'allergies': allergies,
-        'health_conditions': healthConditions,
-        'food_preferences': [foodPreference], // backend schema expects a list
+        'anyother_specific_allergy': otherAllergies,
+        'food_preferences': [foodPreference],
         'cuisine_preferences': cuisinePreferences,
       };
 
@@ -48,7 +48,7 @@ class FamilyMember {
         age: age,
         gender: gender,
         allergies: allergies,
-        healthConditions: healthConditions,
+        otherAllergies: otherAllergies,
         foodPreference: foodPreference,
         cuisinePreferences: cuisinePreferences,
       );

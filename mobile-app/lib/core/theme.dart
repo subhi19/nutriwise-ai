@@ -11,7 +11,7 @@ class AppColors {
   static const success = Color(0xFF43A047);
   static const background = Color(0xFFFFFBF4);
   static const surface = Colors.white;
-  static const textPrimary = Color(0xFF26322E);
+  static const textPrimary = Color(0xFF161F1C);
   static const textSecondary = Color(0xFF6B7A72);
 
   static const child = Color(0xFF4FC3F7);
@@ -44,13 +44,13 @@ final appTheme = ThemeData(
     error: AppColors.danger,
   ),
   textTheme: TextTheme(
-    bodyLarge: GoogleFonts.nunito(fontSize: 16, color: AppColors.textPrimary),
-    bodyMedium: GoogleFonts.nunito(fontSize: 15, color: AppColors.textPrimary),
-    bodySmall: GoogleFonts.nunito(fontSize: 13, color: AppColors.textSecondary),
-    titleLarge: GoogleFonts.fredoka(fontSize: 24, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-    titleMedium: GoogleFonts.fredoka(fontSize: 19, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-    titleSmall: GoogleFonts.fredoka(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-    labelLarge: GoogleFonts.nunito(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+    bodyLarge: GoogleFonts.inter(fontSize: 16, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
+    bodyMedium: GoogleFonts.inter(fontSize: 15, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
+    bodySmall: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+    titleLarge: GoogleFonts.inter(fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+    titleMedium: GoogleFonts.inter(fontSize: 19, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+    titleSmall: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+    labelLarge: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
   ),
   elevatedButtonTheme: ElevatedButtonThemeData(
     style: ElevatedButton.styleFrom(
@@ -108,7 +108,7 @@ final appTheme = ThemeData(
     foregroundColor: AppColors.textPrimary,
     elevation: 0,
     centerTitle: false,
-    titleTextStyle: GoogleFonts.fredoka(fontSize: 20, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+    titleTextStyle: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
     backgroundColor: AppColors.surface,
