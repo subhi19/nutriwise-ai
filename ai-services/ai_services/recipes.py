@@ -40,6 +40,7 @@ def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> R
     all_preferences = set()
     for member in family:
         all_allergies.update(member.allergies)
+        all_allergies.update(member.anyother_specific_allergy)  # free-text allergies, treated the same as the fixed list
         all_preferences.update(member.food_preferences)
 
     prompt = f"""You are a kitchen assistant. Here is what's in the fridge:

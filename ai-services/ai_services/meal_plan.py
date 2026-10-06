@@ -40,6 +40,24 @@ from schemas import (
 
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
+# The frontend's 11 meal type dropdown options (IATA-style special meal
+# codes). DayPreference.meal_type receives the short CODE (e.g. "VJML").
+# Gemini doesn't know what "VJML" means, so we translate it into a clear
+# instruction before it goes into the prompt.
+MEAL_TYPE_INFO = {
+    "MOML": ("Muslim Meal", "Halal — no pork, no alcohol"),
+    "HNML": ("Hindu Non-Vegetarian Meal", "Indian-style, no beef or pork"),
+    "VJML": ("Vegetarian Jain Meal", "Strictly plant-based, and NO root vegetables at all (no onion, garlic, potato, carrot, radish)"),
+    "VLML": ("Vegetarian Lacto-Ovo Meal", "Vegetarian, may include eggs and dairy"),
+    "VGML": ("Vegan Meal", "Fully plant-based — no meat, dairy, eggs, or honey"),
+    "KSML": ("Kosher Meal", "Prepared to Jewish dietary laws"),
+    "FPML": ("Fruit Platter Meal", "Fresh seasonal fruit only, no cooked dishes"),
+    "SFML": ("Seafood Meal", "Seafood-based dishes throughout"),
+    "AVML": ("Asian Vegetarian Meal", "Indian-style vegetarian"),
+    "RVML": ("Raw Vegetarian Meal", "Uncooked plant-based ingredients only"),
+    "VOML": ("Vegetarian Oriental Meal", "Asian-style vegetarian"),
+}
+
 
 def _summarize_family(family: list[FamilyMember]) -> dict:
     """Combines the whole family's restrictions into one summary, so the
@@ -50,6 +68,7 @@ def _summarize_family(family: list[FamilyMember]) -> dict:
 
     for member in family:
         allergies.update(member.allergies)
+        allergies.update(member.anyother_specific_allergy)  # free-text allergies, treated the same as the fixed list
         preferences.update(member.food_preferences)
         cuisines.update(member.cuisine_preferences)
 
@@ -64,7 +83,13 @@ def _format_day_preference(dp: DayPreference) -> str:
     """Combines whichever fields are set into one readable line for the prompt."""
     parts = []
     if dp.meal_type:
-        parts.append(f"meal type: {dp.meal_type}")
+        info = MEAL_TYPE_INFO.get(dp.meal_type.upper())
+        if info:
+            name, rule = info
+            parts.append(f"meal type: {name} — STRICTLY: {rule}")
+        else:
+            # Unknown code — pass it through as-is rather than failing
+            parts.append(f"meal type: {dp.meal_type}")
     if dp.cuisine:
         parts.append(f"cuisine: {dp.cuisine}")
     if dp.preference:
