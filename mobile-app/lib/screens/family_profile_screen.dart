@@ -348,7 +348,7 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
                 decoration: const InputDecoration(labelText: 'Age *', prefixIcon: Icon(Icons.cake_outlined)),
                 validator: (v) {
                   final n = int.tryParse(v ?? '');
-                  if (n == null || n < 0 || n > 120) return 'Enter a valid age (0-120)';
+                  if (n == null || n < 1 || n > 100) return 'Enter a valid age';
                   return null;
                 },
               ),
