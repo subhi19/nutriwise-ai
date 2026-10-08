@@ -12,14 +12,22 @@ from nutrition_repo import search_food
 from calculator import calculate_nutrients, add_totals
 from schemas import MealAnalysis, MealItem, NutrientTotals, ItemCorrection
 from meal_analyzer import estimate_nutrients_with_gemini, _find_missing_nutrients, _get_suggestions
+from errors import invalid_input
 
 
-def _resolve_item(name: str, weight_g: float) -> MealItem:
+def _resolve_item(name: str, weight_g: float | None) -> MealItem:
     """
     Looks up one food name. If it's in our database, use the real numbers.
     If not, fall back to a Gemini estimate (same as meal_analyzer.py does).
+
+    weight_g can be None when the user added a dish without a weight. Then
+    we use that food's typical serving from the database, or 100 g only if
+    the food isn't in the database at all.
     """
     food = search_food(name)
+
+    if weight_g is None:
+        weight_g = (food.get("typical_serving_g") if food else None) or 100
 
     if food is not None:
         nutrients = calculate_nutrients(food, weight_g)
@@ -61,13 +69,21 @@ def correct_meal(
     items = list(previous.items)
 
     for correction in corrections:
-        # Keep the old weight if the user didn't give a new one
+        # Basic input checks, reported with the standard INVALID_INPUT error
+        if not correction.name or not correction.name.strip():
+            raise invalid_input("Please type a dish name.")
+        if correction.item_index is not None and not (0 <= correction.item_index < len(items)):
+            raise invalid_input("That dish no longer exists in this meal. Please refresh and try again.")
+
+        # Keep the old weight if the user didn't give a new one.
+        # For a brand new dish with no weight, stay None so _resolve_item
+        # can use that food's typical serving from the database.
         if correction.weight_g is not None:
             weight_g = correction.weight_g
         elif correction.item_index is not None:
             weight_g = items[correction.item_index].weight_g
         else:
-            weight_g = 100  # a reasonable default serving if adding a brand new item
+            weight_g = None
 
         new_item = _resolve_item(correction.name, weight_g)
 

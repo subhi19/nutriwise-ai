@@ -1,95 +1,243 @@
 """
-test_full_flow.py
+test_meal_plan_flow.py
 
-Proves the WHOLE chain works together, exactly as described:
+Tests the Weekly Planner flow the way the real screen works — you choose
+ONE path, not every scenario at once:
 
-  Option A (no photo):
-      generate_meal_plan(family, inventory=None)
-      -> generate_grocery_list(family, plan, inventory=None)
-      -> grocery list has EVERYTHING the plan needs
+    1) No photo      -> generate_meal_plan(family, inventory=None)
+    2) Fridge photo  -> analyze_fridge(photo) -> you add/remove ingredients
+                     -> generate_meal_plan(family, inventory)
 
-  Option B (photo uploaded):
-      analyze_fridge(photo) -> FridgeInventory
-      -> generate_meal_plan(family, inventory)   [AI may add extra ingredients too]
-      -> generate_grocery_list(family, plan, inventory)
-      -> grocery list EXCLUDES whatever was in the photo
+Then, like the "Create new plan" button, you can rerun and the dishes you
+just saw are passed back as avoid_dishes so the new plan is different.
 
-Run this once with a real fridge/vegetable photo to see both paths for
-yourself before moving on to anything else.
+Run:   python test_meal_plan_flow.py
 """
 
 import os
+import sys
+import mimetypes
+
+# Works whether this file sits in ai_services/ or in a sibling tests/ folder
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _here)
+sys.path.insert(0, os.path.join(_here, "..", "ai_services"))
+
 from fridge_analyzer import analyze_fridge
 from meal_plan import generate_meal_plan
-from grocery import generate_grocery_list
-from schemas import FamilyMember
+from schemas import FamilyMember, FridgeInventory, InventoryItem
+from errors import AIServiceError
 
-fake_family = [
-    FamilyMember(
-        name="Test User", age=35, gender="female",
-        allergies=["peanut"],
-        food_preferences=["vegetarian"],
-        cuisine_preferences=["indian"],
-    )
+# Pretend household (until the backend loads real profiles from the database)
+HOUSEHOLD = [
+    FamilyMember(name="Asha", age=38, gender="female",
+                 allergies=["peanut"], food_preferences=["vegetarian"],
+                 cuisine_preferences=["indian"]),
+    FamilyMember(name="Ravi", age=40, gender="male",
+                 food_preferences=["non_vegetarian"],
+                 cuisine_preferences=["indian", "chinese"]),
+    FamilyMember(name="Meena", age=9, gender="female",
+                 allergies=["milk"], cuisine_preferences=["indian"]),
 ]
 
-print("=" * 60)
-print("OPTION A: No photo uploaded")
-print("=" * 60)
 
-plan_a = generate_meal_plan(fake_family, inventory=None)
-print(f"\nMonday: {plan_a.days[0].breakfast.name} / {plan_a.days[0].lunch.name} / {plan_a.days[0].dinner.name}")
-
-grocery_a = generate_grocery_list(fake_family, plan_a, inventory=None)
-print(f"\nGrocery list: {len(grocery_a.items)} items (should include EVERYTHING the plan needs)")
-for item in grocery_a.items[:6]:
-    print(f"  [{item.category}] {item.name} — {item.quantity}")
+def find_image(name: str) -> str | None:
+    for path in [name, os.path.join("images", name),
+                 os.path.join(_here, name), os.path.join(_here, "images", name),
+                 os.path.join(_here, "..", "ai_services", "images", name)]:
+        if os.path.isfile(path):
+            return path
+    return None
 
 
-print("\n\n" + "=" * 60)
-print("OPTION B: Photo uploaded")
-print("=" * 60)
+def pick_members() -> list[FamilyMember]:
+    print("\nWho is eating this week?")
+    for i, m in enumerate(HOUSEHOLD, 1):
+        extras = []
+        if m.allergies:
+            extras.append("allergic: " + ", ".join(m.allergies))
+        if m.food_preferences:
+            extras.append(", ".join(m.food_preferences))
+        print(f"  {i}. {m.name} ({m.age})  {'; '.join(extras)}")
+    raw = input("Numbers separated by commas (Enter = everyone): ").strip()
+    if not raw:
+        return list(HOUSEHOLD)
+    chosen = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit() and 1 <= int(part) <= len(HOUSEHOLD):
+            chosen.append(HOUSEHOLD[int(part) - 1])
+    return chosen or list(HOUSEHOLD)
 
-use_real_photo = input("\nDo you have a fridge/vegetable photo to test with? (y/n): ").strip().lower()
 
-if use_real_photo == "y":
-    image_name = input("Image file name (e.g. fridge.jpg): ").strip().strip('"')
-    image_path = os.path.join("images", image_name)
-    with open(image_path, "rb") as f:
-        image_bytes = f.read()
+def get_inventory() -> FridgeInventory | None:
+    print("\nOption 1: skip the photo (AI plans freely)")
+    print("Option 2: upload a fridge / vegetable photo")
+    if input("Choose 1 or 2: ").strip() != "2":
+        return None
 
-    print("\nAnalyzing photo...")
-    inventory = analyze_fridge(image_bytes, "image/jpeg")
+    name = input("Photo file name: ").strip().strip('"')
+    path = find_image(name)
+    if not path:
+        print(f"Could not find '{name}'. Continuing WITHOUT a photo.")
+        return None
 
-    print("\n--- What was detected ---")
-    for item in inventory.items:
-        print(f"  {item.name}" + (" [USE SOON]" if item.use_soon else ""))
-else:
-    # Fallback fake data, so this still runs even without a photo handy
-    from schemas import InventoryItem, FridgeInventory
-    print("\n(Using sample data instead of a real photo)")
-    inventory = FridgeInventory(items=[
-        InventoryItem(name="Onion", use_soon=False),
-        InventoryItem(name="Tomatoes", use_soon=False),
-        InventoryItem(name="Spinach", use_soon=True, expiry_estimate="Use within 2 days"),
-    ])
+    mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+    with open(path, "rb") as f:
+        data = f.read()
 
-print("\nGenerating meal plan using this inventory...")
-plan_b = generate_meal_plan(fake_family, inventory=inventory)
-print(f"\nMonday: {plan_b.days[0].breakfast.name} / {plan_b.days[0].lunch.name} / {plan_b.days[0].dinner.name}")
-print("Plan notes:", plan_b.notes)
+    print("\nAnalyzing the photo...")
+    inventory = analyze_fridge(data, mime)
 
-print("\nGenerating grocery list (should EXCLUDE what's in the photo)...")
-grocery_b = generate_grocery_list(fake_family, plan_b, inventory=inventory)
+    # Confirm / edit step, same as the app's ingredient chips
+    while True:
+        print("\nIngredients found:")
+        for i, item in enumerate(inventory.items, 1):
+            soon = f"  [USE SOON — {item.expiry_estimate}]" if item.use_soon else ""
+            print(f"  {i}. {item.name}{soon}")
+        cmd = input("\nType a number to REMOVE it, a name to ADD it, or Enter to confirm: ").strip()
+        if not cmd:
+            return inventory
+        if cmd.isdigit() and 1 <= int(cmd) <= len(inventory.items):
+            removed = inventory.items.pop(int(cmd) - 1)
+            print(f"  removed {removed.name}")
+        elif not cmd.isdigit():
+            inventory.items.append(InventoryItem(name=cmd))
+            print(f"  added {cmd}")
 
-fridge_item_names = {item.name.lower() for item in inventory.items}
-print(f"\nGrocery list: {len(grocery_b.items)} items")
-for item in grocery_b.items:
-    print(f"  [{item.category}] {item.name} — {item.quantity}")
 
-# Sanity check: confirm none of the fridge items leaked into the grocery list
-leaked = [item.name for item in grocery_b.items if item.name.lower() in fridge_item_names]
-if leaked:
-    print(f"\n⚠️  WARNING: these fridge items leaked into the grocery list: {leaked}")
-else:
-    print("\n✅ Confirmed: nothing from the fridge photo appears in the grocery list.")
+def show_plan(plan):
+    print(f"\n{'=' * 60}\n7-DAY PLAN\n{'=' * 60}")
+    for d in plan.days:
+        print(f"\n{d.day}  —  {d.nutrients.calories:g} kcal, protein {d.nutrients.protein_g:g} g")
+        print(f"  Breakfast: {d.breakfast.name} ({d.breakfast.nutrients.calories:g} kcal)")
+        print(f"  Lunch:     {d.lunch.name} ({d.lunch.nutrients.calories:g} kcal)")
+        print(f"  Dinner:    {d.dinner.name} ({d.dinner.nutrients.calories:g} kcal)")
+        if d.snack:
+            print(f"  Snack:     {d.snack.name} ({d.snack.nutrients.calories:g} kcal)")
+        if d.unmatched_ingredients:
+            print(f"  (AI-estimated, not in database: {', '.join(d.unmatched_ingredients)})")
+    if plan.notes:
+        print("\nNotes:")
+        for n in plan.notes:
+            print(f"  - {n}")
+
+
+def dish_names(plan) -> list[str]:
+    names = []
+    for d in plan.days:
+        for meal in (d.breakfast, d.lunch, d.dinner, d.snack):
+            if meal and meal.name not in names:
+                names.append(meal.name)
+    return names
+
+
+def main():
+    family = pick_members()
+    print(f"\nPlanning for: {', '.join(m.name for m in family)}")
+
+    inventory = get_inventory()
+    print("\nMode:", "WITH fridge photo ingredients" if inventory else "NO photo (free plan)")
+
+    avoid = None
+    while True:
+        print("\nGenerating the 7-day plan (this can take a minute)...")
+        try:
+            plan = generate_meal_plan(family, inventory=inventory, avoid_dishes=avoid)
+        except (AIServiceError, RuntimeError) as e:
+            print(f"\nPlan failed: {e}")
+            return
+
+        show_plan(plan)
+
+        if input("\nLove it? Press Enter to finish, or type n for a different plan: ").strip().lower() != "n":
+            print("\nDone.")
+            return
+
+        avoid = dish_names(plan)
+        print(f"\nRerunning and telling the AI to avoid {len(avoid)} dishes it just showed...")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+#  Who is eating this week?
+#   1. Asha (38)  allergic: peanut; vegetarian
+#   2. Ravi (40)  non_vegetarian
+#   3. Meena (9)  allergic: milk
+# Numbers separated by commas (Enter = everyone): 2,3
+
+# Planning for: Ravi, Meena
+
+# Option 1: skip the photo (AI plans freely)
+# Option 2: upload a fridge / vegetable photo
+# Choose 1 or 2: 1
+
+# Mode: NO photo (free plan)
+
+# Generating the 7-day plan (this can take a minute)...
+# Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+
+
+# ============================================================
+# 7-DAY PLAN
+# ============================================================
+
+# Monday  —  2363.4 kcal, protein 110.4 g
+#   Breakfast: Indian Egg Bhurji with Whole Wheat Roti (370.2 kcal)
+#   Lunch:     Chinese Chicken Fried Rice (967.9 kcal)
+#   Dinner:    Indian Chicken Curry with Basmati Rice (949.6 kcal)
+#   Snack:     Spiced Roasted Chickpeas (75.7 kcal)
+#   (AI-estimated, not in database: Whole Wheat Flour, Ginger-Garlic Paste)
+
+# Tuesday  —  2197.6 kcal, protein 92.9 g
+#   Breakfast: Indian Potato Masala Dosa with Coconut Chutney (347.6 kcal)
+#   Lunch:     Chinese Kung Pao Chicken with Steamed White Rice (968.2 kcal)
+#   Dinner:    Indian Mutton Curry with Roti (656.8 kcal)
+#   Snack:     Fresh Mango Slices (225 kcal)
+#   (AI-estimated, not in database: Whole Wheat Flour)
+
+# Wednesday  —  2028.8 kcal, protein 118.5 g
+#   Breakfast: Chinese Steamed Chicken and Chive Dumplings (538.2 kcal)
+#   Lunch:     Indian Coconut Fish Curry with Steamed Rice (781 kcal)
+#   Dinner:    Chinese Chicken Chow Mein (677.1 kcal)
+#   Snack:     Indian Sprouted Moong Salad (32.5 kcal)
+#   (AI-estimated, not in database: Shredded Cabbage)
+
+# Thursday  —  1954.7 kcal, protein 82.2 g
+#   Breakfast: Indian Poha with Hard-Boiled Eggs (348.5 kcal)
+#   Lunch:     Chinese Sweet and Sour Chicken with Rice (983 kcal)
+#   Dinner:    Indian Egg Curry with Basmati Rice (588 kcal)
+#   Snack:     Smashed Chinese Cucumber Salad (35.2 kcal)
+#   (AI-estimated, not in database: Pineapple Chunks, Minced Garlic)
+
+# Friday  —  1085.6 kcal, protein 47.2 g
+#   Breakfast: Chinese Savory Chicken Congee (378.9 kcal)
+#   Lunch:     Indian Keema Matar with Paratha (46.8 kcal)
+#   Dinner:    Chinese Mapo Tofu with Pork and Rice (612.8 kcal)
+#   Snack:     Roasted Salted Cashews (47.1 kcal)
+#   (AI-estimated, not in database: Fresh Ginger, Minced Chicken/Mutton, Whole Wheat Flour, Ground Pork)
+
+# Saturday  —  1757.4 kcal, protein 75 g
+#   Breakfast: Indian Chicken Keema Stuffed Paratha (269 kcal)
+#   Lunch:     Chinese Sichuan Garlic Shrimp with Rice (430.2 kcal)
+#   Dinner:    Dairy-Free Indian Chicken Biryani (1019.2 kcal)
+#   Snack:     Boiled Egg with Black Pepper (39 kcal)
+#   (AI-estimated, not in database: Whole Wheat Flour, Peeled Shrimp, Garlic, Sliced Fried Onions)
+
+# Sunday  —  1577.1 kcal, protein 61.1 g
+#   Breakfast: Chinese Steamed Pork Baozi (Buns) (154.4 kcal)
+#   Lunch:     Indian Prawn Coconut Curry with Rice (485 kcal)
+#   Dinner:    Chinese Hainanese Chicken Rice (937.7 kcal)
+#   Snack:     Dry Roasted Soybeans (Edamame) (0 kcal)
+#   (AI-estimated, not in database: Ground Pork, Raw Prawns, Roasted Soybeans)
+
+# Notes:
+#   - All traditional Indian recipes (such as Biryani and Curries) have been prepared using plant-based oils and coconut milk in place of ghee, yogurt, or butter to strictly avoid milk allergens.
+#   - Wednesday: 'Milk (whole)' may contain 'milk' — please check.
+#   - Saturday: 'Milk (whole)' may contain 'milk' — please check.
+#   - Sunday: 'Milk (whole)' may contain 'milk' — please check.
+
+# Love it? Press Enter to finish, or type n for a different plan: 

@@ -97,7 +97,12 @@ def _format_day_preference(dp: DayPreference) -> str:
     return ", ".join(parts) if parts else "no specific request"
 
 
-def _build_prompt(summary: dict, inventory: FridgeInventory | None, day_preferences: list[DayPreference] | None) -> str:
+def _build_prompt(
+    summary: dict,
+    inventory: FridgeInventory | None,
+    day_preferences: list[DayPreference] | None,
+    avoid_dishes: list[str] | None = None,
+) -> str:
     lines = [
         "You are a meal planning assistant. Create a 7-day meal plan",
         "(Monday to Sunday), each with breakfast, lunch, dinner, and an",
@@ -137,6 +142,14 @@ def _build_prompt(summary: dict, inventory: FridgeInventory | None, day_preferen
         )
         for dp in day_preferences:
             lines.append(f"  {dp.day}: {_format_day_preference(dp)}")
+
+    if avoid_dishes:
+        lines.append("")
+        lines.append(
+            "The user already saw a plan and did NOT like it. Do NOT use any of these "
+            "dishes again — suggest clearly different dishes instead: "
+            f"{', '.join(avoid_dishes)}."
+        )
 
     lines.append("")
     lines.append(
@@ -272,9 +285,15 @@ def generate_meal_plan(
     family: list[FamilyMember],
     inventory: FridgeInventory | None = None,
     day_preferences: list[DayPreference] | None = None,
+    avoid_dishes: list[str] | None = None,
 ) -> WeeklyPlan:
+    """
+    avoid_dishes: dish names from a plan the user just rejected ("Create new
+    plan"). Pass them back in so the new plan uses different dishes. Leave
+    as None for a first-time plan.
+    """
     summary = _summarize_family(family)
-    prompt = _build_prompt(summary, inventory, day_preferences)
+    prompt = _build_prompt(summary, inventory, day_preferences, avoid_dishes)
 
     def make_request():
         response = client.models.generate_content(

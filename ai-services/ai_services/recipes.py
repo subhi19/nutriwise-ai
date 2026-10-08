@@ -31,7 +31,16 @@ from schemas import (
 )
 
 
-def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> RecipeSuggestions:
+def suggest_recipes(
+    inventory: FridgeInventory,
+    family: list[FamilyMember],
+    avoid_dishes: list[str] | None = None,
+) -> RecipeSuggestions:
+    """
+    avoid_dishes: recipe names the user just rejected ("suggest another").
+    Pass them back in so the new suggestions are different. None for a
+    first-time request.
+    """
     # Separate the "use soon" items so we can ask Gemini to prioritize them
     expiring = [item.name for item in inventory.items if item.use_soon]
     all_items = [item.name for item in inventory.items]
@@ -43,6 +52,13 @@ def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> R
         all_allergies.update(member.anyother_specific_allergy)  # free-text allergies, treated the same as the fixed list
         all_preferences.update(member.food_preferences)
 
+    avoid_text = ""
+    if avoid_dishes:
+        avoid_text = (
+            "The user did NOT like these recipes, so do NOT suggest them again — "
+            f"give clearly different ones: {', '.join(avoid_dishes)}.\n\n"
+        )
+
     prompt = f"""You are a kitchen assistant. Here is what's in the fridge:
 {', '.join(all_items)}
 
@@ -51,7 +67,7 @@ These items are close to spoiling and should be prioritized: {', '.join(expiring
 Family restrictions — avoid these allergens completely: {', '.join(all_allergies) or 'none'}
 Food preferences to respect: {', '.join(all_preferences) or 'none'}
 
-Suggest 3 simple recipes using ONLY the ingredients listed above. Do NOT
+{avoid_text}Suggest 3 simple recipes using ONLY the ingredients listed above. Do NOT
 require any ingredient that is not in that list, EXCEPT common pantry
 staples (salt, oil, basic spices, water) which can be assumed available —
 list those separately as "pantry_staples", not as tracked ingredients.

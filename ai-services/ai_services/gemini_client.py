@@ -23,7 +23,7 @@ import os
 from google import genai
 
 USE_VERTEX = os.getenv("USE_VERTEX", "false").lower() == "true"
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.8-flash")
+MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.5-flash")
 
 
 def _build_client() -> genai.Client:
