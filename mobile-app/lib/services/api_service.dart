@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../models/auth_session.dart';
 import '../models/family_member.dart';
 import 'dart:typed_data';
@@ -9,6 +10,8 @@ import '../models/day_preference.dart';
 import '../models/fridge_inventory.dart';
 import '../models/meal_plan.dart';
 import '../models/meal_type.dart';
+import '../models/grocery_list.dart';
+import '../models/recipe.dart';
 
 // Flip to true once AI/backend confirm they accept `day_preferences`.
 const kSendDayPreferences = false;
@@ -45,7 +48,8 @@ abstract class NutriApi {
   Future<AuthSession> login(String email, String password);
   Future<void> register(String name, String email, String password);
   Future<void> deleteMember(String memberId);
-  Future<void> forgotPassword(String email);
+  Future<String?> forgotPassword(String email); // returns a reset code only if the server includes one
+  Future<void> resetPassword({required String email, required String token, required String newPassword});
   Future<List<FamilyMember>> getMembers(int userId);
   Future<FamilyMember> createMember(int userId, FamilyMember member);
   Future<FamilyMember> updateMember(String memberId, FamilyMember member);
@@ -54,6 +58,9 @@ abstract class NutriApi {
   Future<FridgeInventory> analyzeFridge(Uint8List image);
   Future<WeeklyPlan> generateMealPlan(
     List<FamilyMember> family, FridgeInventory? inventory, List<DayPreference> dayPreferences);
+  Future<GroceryList> generateGroceryList(List<FamilyMember> family, WeeklyPlan plan,
+    FridgeInventory? inventory, List<String> userRequirements);
+  Future<RecipeSuggestions> suggestRecipes(FridgeInventory inventory, List<FamilyMember> family);
 }
 
 // ---------- Mock implementation ----------
@@ -108,8 +115,17 @@ class MockApi implements NutriApi {
   }
 
   @override
-  Future<void> forgotPassword(String email) async {
+  Future<String?> forgotPassword(String email) async {
     await Future.delayed(const Duration(milliseconds: 500));
+    return 'MOCK-1234'; // mock only: pretend the server returned a code
+  }
+
+  @override
+  Future<void> resetPassword({required String email, required String token, required String newPassword}) async {
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (token.trim().toUpperCase() != 'MOCK-1234') {
+      throw ApiException(code: 'AUTH_ERROR', message: 'That reset code is invalid or has expired.', retry: false);
+    }
   }
 
   @override
@@ -180,67 +196,224 @@ class MockApi implements NutriApi {
       List<FamilyMember> family, FridgeInventory? inventory, List<DayPreference> dayPreferences) async {
     await Future.delayed(const Duration(milliseconds: 1800));
 
-    PlannedMeal m(String n, List<String> i, [String? note]) =>
-        PlannedMeal(name: n, ingredients: i, notes: note);
+    PlannedMeal m(String n, List<String> i, double kcal, [String? note]) =>
+        PlannedMeal(name: n, ingredients: i, calories: kcal, notes: note);
 
     final breakfasts = [
-      m('Oats with banana', ['Oats', 'Banana', 'Milk']),
-      m('Vegetable upma', ['Semolina', 'Carrot', 'Peas']),
-      m('Egg bhurji with toast', ['Eggs', 'Onion', 'Bread']),
-      m('Idli with sambar', ['Idli batter', 'Lentils', 'Mixed vegetables']),
+      m('Indian Masala Omelette', ['Eggs', 'Onion', 'Tomato'], 216),
+      m('Banana and Kiwi Fruit Bowl', ['Banana', 'Kiwi'], 261),
+      m('Indian Veggie Poha', ['Poha', 'Peas', 'Carrot'], 248),
+      m('Dairy-Free Banana Pancakes', ['Wheat flour', 'Banana'], 360),
     ];
     final lunches = [
-      m('Brown rice with dal', ['Brown rice', 'Yellow dal']),
-      m('Chapati with mixed veg curry', ['Wheat flour', 'Beans', 'Carrot']),
-      m('Veg pulao with raita', ['Basmati rice', 'Peas', 'Yogurt']),
-      m('Rajma with rice', ['Kidney beans', 'Rice', 'Onion']),
+      m('Chinese Chicken and Cabbage Stir-Fry', ['Chicken', 'Cabbage', 'Garlic'], 557),
+      m('Indian Chana Masala with Rice', ['Chickpeas', 'Rice', 'Spices'], 283),
+      m('Chinese Veggie Fried Rice', ['Rice', 'Mixed vegetables', 'Soy sauce'], 490),
+      m('Indian Dal Tadka with Roti', ['Toor dal', 'Wheat flour', 'Cumin'], 330),
     ];
     final dinners = [
-      m('Vegetable soup with toast', ['Carrot', 'Beans', 'Tomato', 'Bread']),
-      m('Paneer bhurji with roti', ['Paneer', 'Onion', 'Wheat flour']),
-      m('Khichdi with curd', ['Rice', 'Moong dal', 'Yogurt']),
-      m('Palak dal with chapati', ['Spinach', 'Toor dal', 'Wheat flour']),
+      m('Indian Egg Curry with Roti', ['Eggs', 'Onion', 'Wheat flour'], 353),
+      m('Chinese Egg Drop Soup', ['Eggs', 'Cabbage'], 280),
+      m('Indian Chicken Curry with Rice', ['Chicken', 'Basmati rice', 'Spices'], 794),
+      m('Indian Aloo Gobi with Roti', ['Potato', 'Cauliflower', 'Wheat flour'], 429),
+    ];
+    final snacks = [
+      m('Fresh Fruit Salad', ['Apple', 'Orange', 'Grapes'], 74),
+      m('Cucumber Slices with Pepper', ['Cucumber', 'Pepper'], 23),
+      m('Sweet Grape and Mandarin Mix', ['Grapes', 'Mandarin'], 89),
     ];
     final pantry = inventory?.items.map((i) => i.name).toList() ?? <String>[];
 
     final days = <DayPlan>[];
     for (var i = 0; i < 7; i++) {
       final pref = i < dayPreferences.length ? dayPreferences[i] : null;
-      final typeLabel = pref == null ? null : mealTypeByCode(pref.mealTypeCode).label;
+      final typeLabels =
+          pref?.mealTypeCodes.map((c) => mealTypeByCode(c).label).join(' + ');
+      final userNote = (pref?.notes ?? '').trim();
+
       final b = breakfasts[i % breakfasts.length];
-      final l = lunches[i % lunches.length];
-      var d = dinners[i % dinners.length];
-      // Make the pantry visible in the mock: weave inventory items into a couple of dinners
-      if (pantry.isNotEmpty && (i == 0 || i == 3)) {
-        d = m(d.name, [...d.ingredients, ...pantry.take(2)], 'Uses items from your fridge');
-      }
+      final l0 = lunches[i % lunches.length];
+      final d0 = dinners[i % dinners.length];
+      final s = snacks[i % snacks.length];
+
+      final l = m(l0.name, l0.ingredients, l0.calories!, typeLabels);
+      final d = (pantry.isNotEmpty && (i == 0 || i == 3))
+          ? m(d0.name, [...d0.ingredients, ...pantry.take(2)], d0.calories!, 'Uses items from your fridge')
+          : m(d0.name, d0.ingredients, d0.calories!, userNote.isEmpty ? null : 'Your note: $userNote');
+
+      final total = b.calories! + l.calories! + d.calories! + s.calories!;
       days.add(DayPlan(
         day: kWeekdays[i],
         breakfast: b,
-        lunch: m(l.name, l.ingredients, typeLabel),
+        lunch: l,
         dinner: d,
-        ingredients: {...b.ingredients, ...l.ingredients, ...d.ingredients}.toList(),
+        snack: s,
+        ingredients: {...b.ingredients, ...l.ingredients, ...d.ingredients, ...s.ingredients}.toList(),
+        declaredTotalCalories: total,
+        totalProteinG: total * 0.055,
       ));
     }
     return WeeklyPlan(days: days, notes: ['Mock plan for UI testing only.']);
+  }
+
+  @override
+  Future<GroceryList> generateGroceryList(List<FamilyMember> family, WeeklyPlan plan,
+      FridgeInventory? inventory, List<String> userRequirements) async {
+    await Future.delayed(const Duration(milliseconds: 900));
+    final have = inventory?.items.map((i) => i.name.toLowerCase()).toList() ?? <String>[];
+    bool atHome(String ing) {
+      final s = ing.toLowerCase();
+      return have.any((h) => s.contains(h) || h.contains(s));
+    }
+
+    String categoryOf(String name) {
+      final s = name.toLowerCase();
+      if (RegExp(r'milk|yogurt|paneer|cheese|curd|butter').hasMatch(s)) return 'Dairy';
+      if (RegExp(r'chicken|fish|egg|meat|tofu').hasMatch(s)) return 'Protein';
+      if (RegExp(r'rice|flour|oats|bread|poha|semolina|noodle').hasMatch(s)) return 'Grains';
+      if (RegExp(r'dal|chickpea|lentil|kidney').hasMatch(s)) return 'Pulses';
+      if (RegExp(r'apple|banana|orange|kiwi|grape|mango|mandarin').hasMatch(s)) return 'Fruits';
+      if (RegExp(r'spice|cumin|salt|pepper|masala|sauce|oil').hasMatch(s)) return 'Spices & Pantry';
+      return 'Vegetables';
+    }
+
+    final counts = <String, int>{};
+    for (final d in plan.days) {
+      for (final ing in d.ingredients) {
+        if (!atHome(ing)) counts[ing] = (counts[ing] ?? 0) + 1;
+      }
+    }
+    final items = counts.entries.map((e) {
+      final cat = categoryOf(e.key);
+      return GroceryItem(
+        name: e.key,
+        quantity: cat == 'Spices & Pantry' ? '1 pack' : '${e.value * 200} g',
+        category: cat,
+        source: 'missing_ingredient',
+      );
+    }).toList()
+      ..sort((a, b) => a.category.compareTo(b.category));
+
+    for (final r in userRequirements) {
+      items.add(GroceryItem(name: r, quantity: '1 pack', category: 'Other', source: 'user_added'));
+    }
+    // Mock only: pretend the last typed item isn't in the catalog, so that UI section can be tested.
+    return GroceryList(
+      items: items,
+      notInDatabase: userRequirements.isEmpty ? [] : [userRequirements.last],
+    );
+  }
+
+  int _recipeCalls = 0;
+
+  @override
+  Future<RecipeSuggestions> suggestRecipes(FridgeInventory inventory, List<FamilyMember> family) async {
+    await Future.delayed(const Duration(milliseconds: 1500));
+    RecipeIngredient ing(String n, double g, double kcal, [bool est = false]) =>
+        RecipeIngredient(name: n, weightG: g, calories: kcal, aiEstimate: est);
+    NutrientTotals nut(double k, double p, double c, double f, double fi) =>
+        NutrientTotals(calories: k, proteinG: p, carbsG: c, fatG: f, fiberG: fi);
+
+    final setA = [
+      Recipe(
+        name: 'Cabbage, Beetroot, and Carrot Slaw',
+        nutrition: nut(169, 5.8, 39.7, 0.7, 12.3),
+        ingredients: [ing('Cabbage', 200, 50, true), ing('Beetroot', 100, 43, true),
+          ing('Carrot (raw)', 100, 33), ing('Orange', 50, 43)],
+        pantryStaples: ['oil', 'salt', 'black pepper'],
+        steps: ['Finely shred the cabbage, beetroot, and carrot.',
+          'Squeeze the citrus juice into a small bowl.',
+          'Whisk the juice with oil, salt, and pepper.',
+          'Toss everything together and rest for 10 minutes.'],
+      ),
+      Recipe(
+        name: 'Simple Tomato Cucumber Salad',
+        nutrition: nut(66, 3.2, 15, 0.6, 3.4),
+        ingredients: [ing('Tomato (raw)', 200, 36), ing('Cucumber (raw)', 200, 30)],
+        pantryStaples: ['oil', 'salt', 'black pepper'],
+        steps: ['Dice the tomatoes and cucumbers.', 'Combine in a bowl.',
+          'Drizzle with oil and season.', 'Toss gently and serve.'],
+      ),
+      Recipe(
+        name: 'Fresh Mixed Fruit Bowl',
+        nutrition: nut(209.5, 4.8, 43.2, 3.7, 9.8),
+        ingredients: [ing('Apple', 150, 78), ing('Kiwi', 100, 61, true), ing('Orange', 100, 86)],
+        steps: ['Core and chop the apples.', 'Peel and slice the kiwis and orange.',
+          'Mix everything in a bowl and serve immediately.'],
+      ),
+    ];
+    final setB = [
+      Recipe(
+        name: 'Apple Carrot Crunch Salad',
+        nutrition: nut(150, 2.1, 35, 0.5, 7.5),
+        ingredients: [ing('Apple', 150, 78), ing('Carrot (raw)', 120, 40), ing('Orange', 60, 28)],
+        pantryStaples: ['salt'],
+        steps: ['Grate the carrot and apple.', 'Add orange juice and a pinch of salt.', 'Mix and serve cold.'],
+      ),
+      Recipe(
+        name: 'Cucumber Orange Cooler',
+        nutrition: nut(95, 2.0, 22, 0.3, 4.1),
+        ingredients: [ing('Cucumber (raw)', 250, 38), ing('Orange', 120, 57)],
+        steps: ['Slice the cucumber thinly.', 'Add orange segments.', 'Chill for 10 minutes and serve.'],
+      ),
+    ];
+    return RecipeSuggestions(recipes: (_recipeCalls++ % 2 == 0) ? setA : setB);
   }
 }
 
 // ---------- Real implementation ----------
 
 class RealApi implements NutriApi {
+  final String? Function()? tokenProvider;
+
+  RealApi({this.tokenProvider}) {
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        final token = tokenProvider?.call();
+        if (token != null && token.isNotEmpty) {
+          options.headers['Authorization'] = 'Bearer $token';
+        }
+        handler.next(options);
+      },
+    ));
+  }
+
   final Dio _dio = Dio(BaseOptions(
-    baseUrl: 'http://localhost:8000', // 10.0.2.2:8000 for Android emulator
+    baseUrl: 'http://localhost:8000',
     connectTimeout: const Duration(seconds: 30),
     receiveTimeout: const Duration(seconds: 30),
   ));
 
   Never _handleError(DioException e) {
     final data = e.response?.data;
+
     if (data is Map<String, dynamic>) {
       if (data.containsKey('error')) throw ApiException.fromAiEnvelope(data);
-      if (data.containsKey('detail')) throw ApiException.fromDetail(data['detail'].toString());
+
+      final detail = data['detail'];
+      if (detail is String) throw ApiException.fromDetail(detail);
+
+      // FastAPI validation errors: detail is a list of {loc, msg, type}
+      if (detail is List) {
+        debugPrint('Validation error from server: $detail'); // technical detail for you, not the user
+        throw ApiException(
+          code: 'INVALID_INPUT',
+          message: 'Some details look invalid. Please check your entries and try again.',
+          retry: false,
+        );
+      }
     }
+
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.sendTimeout) {
+      throw ApiException(
+        code: 'TIMEOUT',
+        message: 'This is taking longer than expected. Please try again.',
+        retry: true,
+      );
+    }
+
     throw ApiException(
       code: 'INTERNAL',
       message: 'Network error. Please check your connection and try again.',
@@ -308,10 +481,29 @@ class RealApi implements NutriApi {
   }
 
   @override
-  Future<void> forgotPassword(String email) async {
+  Future<String?> forgotPassword(String email) async {
     try {
-      // TODO: confirm this endpoint with backend — not yet documented in v2.0 contract.
-      await _dio.post('/auth/forgot-password', data: {'email': email});
+      final res = await _dio.post('/auth/forgot-password', data: {'email': email});
+      final data = res.data;
+      if (data is Map) {
+        final t = data['reset_token'] ?? data['token'];
+        if (t is String && t.isNotEmpty) return t;
+      }
+      return null;
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<void> resetPassword({required String email, required String token, required String newPassword}) async {
+    try {
+      // TODO: match these three keys to the ResetPasswordRequest schema in Swagger (/docs).
+      await _dio.post('/auth/reset-password', data: {
+        'email': email,
+        'token': token,
+        'new_password': newPassword,
+      });
     } on DioException catch (e) {
       _handleError(e);
     }
@@ -375,6 +567,39 @@ class RealApi implements NutriApi {
       final res = await _dio.post('/api/meal-plan/generate', data: body,
           options: Options(receiveTimeout: const Duration(seconds: 90)));
       return WeeklyPlan.fromJson(res.data);
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<GroceryList> generateGroceryList(List<FamilyMember> family, WeeklyPlan plan,
+      FridgeInventory? inventory, List<String> userRequirements) async {
+    try {
+      final res = await _dio.post('/api/grocery-list/generate',
+          data: {
+            'family': family.map((m) => m.toJson()).toList(),
+            'plan': plan.toJson(),
+            'inventory': inventory?.toJson(),
+            'user_requirements': userRequirements,
+          },
+          options: Options(receiveTimeout: const Duration(seconds: 90)));
+      return GroceryList.fromJson(res.data);
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<RecipeSuggestions> suggestRecipes(FridgeInventory inventory, List<FamilyMember> family) async {
+    try {
+      final res = await _dio.post('/api/recipes/suggest',
+          data: {
+            'inventory': inventory.toJson(),
+            'family': family.map((m) => m.toJson()).toList(),
+          },
+          options: Options(receiveTimeout: const Duration(seconds: 90)));
+      return RecipeSuggestions.fromJson(res.data);
     } on DioException catch (e) {
       _handleError(e);
     }

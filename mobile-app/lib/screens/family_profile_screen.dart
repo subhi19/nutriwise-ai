@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/constants.dart';
 import '../core/theme.dart';
+import '../core/validators.dart';
+import '../models/day_preference.dart' show kMaxCuisines;
 import '../models/family_member.dart';
 import '../providers/providers.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_brand_bar.dart';
+import '../widgets/error_box.dart';
 import '../widgets/screen_heading.dart';
 import '../widgets/selectable_chip.dart';
 
@@ -24,14 +27,20 @@ class FamilyProfileScreen extends ConsumerWidget {
             children: [
               const AppBrandBar(),
               const ScreenHeading(
-                emoji: '👨‍👩‍👧‍👦',
+                emoji: '👪',
                 title: 'Your Family',
                 subtitle: 'Add everyone you\'re planning meals for',
               ),
               Expanded(
                 child: membersAsync.when(
                   loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (e, _) => Center(child: Text('Failed to load: $e')),
+                  error: (e, _) => Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: ErrorBox(error: e, onRetry: () => ref.invalidate(membersProvider)),
+                    ),
+                  ),
                   data: (members) => members.isEmpty
                       ? _EmptyState(onAdd: () => _openMemberForm(context))
                       : ListView.builder(
@@ -52,6 +61,7 @@ class FamilyProfileScreen extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   OutlinedButton(
+                    style: OutlinedButton.styleFrom(backgroundColor: Colors.white),
                     onPressed: () => context.go('/dashboard'),
                     child: const Text('Continue'),
                   ),
@@ -72,7 +82,7 @@ class FamilyProfileScreen extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      isDismissible: false, // force the explicit close button, so changes aren't lost by an accidental tap-outside
+      isDismissible: false, // only the close button, so changes aren't lost by an accidental tap
       enableDrag: false,
       builder: (_) => _MemberFormSheet(existing: existing),
     );
@@ -92,17 +102,17 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 110, height: 110,
+              width: 110,
+              height: 110,
               decoration: BoxDecoration(
                 color: AppColors.primaryLight.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Center(child: Text('🏠', style: TextStyle(fontSize: 52))),
+              child: const Center(child: Text('👪', style: TextStyle(fontSize: 52))),
             ),
             const SizedBox(height: 20),
             Text('No family members yet',
-                style: Theme.of(context).textTheme.titleMedium,
-                textAlign: TextAlign.center),
+                style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
             const SizedBox(height: 8),
             Text(
               'Add your family so we can personalize meals for everyone — kids, adults, and grandparents alike.',
@@ -140,17 +150,19 @@ class _MemberCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ageStyle = AgeGroupStyle.forAge(member.age);
     final prefColor = FoodPrefStyle.colorFor(member.foodPreference);
+    final allergyCount = member.allergies.length + member.otherAllergies.length;
 
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        onTap: () => _openEdit(context), // tapping the card/name also opens edit
+        onTap: () => _openEdit(context), // tapping the card also opens edit
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
               Container(
-                width: 56, height: 56,
+                width: 56,
+                height: 56,
                 decoration: BoxDecoration(
                   color: ageStyle.color.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
@@ -167,17 +179,18 @@ class _MemberCard extends ConsumerWidget {
                     Text('${member.age} yrs', style: Theme.of(context).textTheme.bodySmall),
                     const SizedBox(height: 8),
                     Wrap(
-                      spacing: 6, runSpacing: 6,
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
                         _Badge(
                           color: prefColor,
                           label:
                               '${FoodPrefStyle.emojiFor(member.foodPreference)} ${AppVocab.displayLabel(member.foodPreference)}',
                         ),
-                        if (member.allergies.isNotEmpty)
+                        if (allergyCount > 0)
                           _Badge(
                             color: AppColors.danger,
-                            label: '⚠️ ${member.allergies.length} allergen${member.allergies.length > 1 ? 's' : ''}',
+                            label: '⚠️ $allergyCount allergen${allergyCount > 1 ? 's' : ''}',
                           ),
                       ],
                     ),
@@ -193,8 +206,16 @@ class _MemberCard extends ConsumerWidget {
                 icon: const Icon(Icons.delete_outline, color: AppColors.textSecondary),
                 tooltip: 'Delete',
                 onPressed: () async {
-                  await ref.read(apiProvider).deleteMember(member.id!);
-                  ref.invalidate(membersProvider);
+                  try {
+                    await ref.read(apiProvider).deleteMember(member.id!);
+                    ref.invalidate(membersProvider);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Couldn\'t delete: $e')),
+                      );
+                    }
+                  }
                 },
               ),
             ],
@@ -243,8 +264,8 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
   final Set<String> _cuisines = {};
 
   bool _saving = false;
-  bool _submitted = false; // show validation errors only after a Save attempt
-  bool _dirty = false;     // tracks unsaved changes, for the close-confirmation
+  bool _submitted = false; // show chip errors only after a Save attempt
+  bool _dirty = false; // unsaved changes, for the close confirmation
 
   @override
   void initState() {
@@ -253,10 +274,6 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
     _nameCtrl = TextEditingController(text: m?.name ?? '');
     _ageCtrl = TextEditingController(text: m?.age.toString() ?? '');
     _otherAllergyCtrl = TextEditingController();
-
-    _nameCtrl.addListener(_markDirty);
-    _ageCtrl.addListener(_markDirty);
-    _otherAllergyCtrl.addListener(_markDirty);
 
     if (m != null) {
       _gender = m.gender;
@@ -269,6 +286,11 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
         _cuisines.addAll(m.cuisinePreferences);
       }
     }
+
+    // Added after pre-filling, so loading an existing member doesn't count as an edit
+    _nameCtrl.addListener(_markDirty);
+    _ageCtrl.addListener(_markDirty);
+    _otherAllergyCtrl.addListener(_markDirty);
   }
 
   void _markDirty() {
@@ -309,9 +331,14 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final specificCuisines = _cuisines.where((c) => c != 'any').length;
+    final cuisineFull = specificCuisines >= kMaxCuisines;
+
     return Padding(
       padding: EdgeInsets.only(
-        left: 20, right: 20, top: 8,
+        left: 20,
+        right: 20,
+        top: 8,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
       child: SingleChildScrollView(
@@ -337,9 +364,13 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Name *', prefixIcon: Icon(Icons.badge_outlined)),
-                validator: (v) =>
-                    (v == null || v.trim().length < 2) ? 'Please enter a name' : null,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: Validators.nameInputFormatters,
+                decoration: const InputDecoration(
+                  labelText: 'Name *',
+                  prefixIcon: Icon(Icons.badge_outlined),
+                ),
+                validator: Validators.personName,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -348,7 +379,7 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
                 decoration: const InputDecoration(labelText: 'Age *', prefixIcon: Icon(Icons.cake_outlined)),
                 validator: (v) {
                   final n = int.tryParse(v ?? '');
-                  if (n == null || n < 1 || n > 100) return 'Enter a valid age';
+                  if (n == null || n < 0 || n > 120) return 'Enter a valid age (0-120)';
                   return null;
                 },
               ),
@@ -362,36 +393,42 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
                     label: g,
                     selected: _gender == g,
                     color: AppColors.primary,
-                    onSelected: (_) => setState(() { _gender = g; _dirty = true; }),
+                    onSelected: (_) => setState(() {
+                      _gender = g;
+                      _dirty = true;
+                    }),
                   );
                 }).toList(),
               ),
-              if (_submitted && _gender == null)
-                const _FieldError('Please select a gender'),
+              if (_submitted && _gender == null) const _FieldError('Please select a gender'),
 
               const SizedBox(height: 20),
               Text('🍽️ Food Preference *', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
+                runSpacing: 8,
                 children: AppVocab.foodPreferences.map((f) {
                   return SelectableChip(
                     label: AppVocab.displayLabel(f),
                     emoji: FoodPrefStyle.emojiFor(f),
                     selected: _foodPref == f,
                     color: FoodPrefStyle.colorFor(f),
-                    onSelected: (_) => setState(() { _foodPref = f; _dirty = true; }),
+                    onSelected: (_) => setState(() {
+                      _foodPref = f;
+                      _dirty = true;
+                    }),
                   );
                 }).toList(),
               ),
-              if (_submitted && _foodPref == null)
-                const _FieldError('Please select a food preference'),
+              if (_submitted && _foodPref == null) const _FieldError('Please select a food preference'),
 
               const SizedBox(height: 20),
               Text('⚠️ Allergies', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Wrap(
-                spacing: 8, runSpacing: 8,
+                spacing: 8,
+                runSpacing: 8,
                 children: AppVocab.allergies.map((a) {
                   return SelectableChip(
                     label: AppVocab.displayLabel(a),
@@ -415,17 +452,23 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
               ),
 
               const SizedBox(height: 20),
-              Text('🌍 Cuisine Preference *', style: Theme.of(context).textTheme.titleMedium),
+              Text('🌍 Cuisine Preference * (up to $kMaxCuisines)',
+                  style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Wrap(
-                spacing: 8, runSpacing: 8,
+                spacing: 8,
+                runSpacing: 8,
                 children: AppVocab.cuisineOptionsForUI.map((c) {
+                  final isAny = c == 'any';
+                  final selected = _cuisines.contains(c);
                   return SelectableChip(
                     label: AppVocab.cuisineLabel(c),
-                    selected: _cuisines.contains(c),
+                    selected: selected,
+                    // Once 2 are picked, the rest grey out. "Any Cuisine" is always available.
+                    enabled: isAny || selected || !cuisineFull,
                     color: AppColors.tertiary,
                     onSelected: (sel) => setState(() {
-                      if (c == 'any') {
+                      if (isAny) {
                         _cuisines
                           ..clear()
                           ..add('any');
@@ -439,7 +482,7 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
                 }).toList(),
               ),
               if (_submitted && _cuisines.isEmpty)
-                const _FieldError('Please select at least one cuisine, or "Any Cuisine"'),
+                const _FieldError('Please select up to 2 cuisines, or "Any Cuisine"'),
 
               const SizedBox(height: 28),
               SizedBox(
@@ -448,7 +491,8 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
                   onPressed: _saving ? null : _save,
                   child: _saving
                       ? const SizedBox(
-                          height: 20, width: 20,
+                          height: 20,
+                          width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Text('Save Member'),
                 ),
@@ -462,54 +506,53 @@ class _MemberFormSheetState extends ConsumerState<_MemberFormSheet> {
   }
 
   Future<void> _save() async {
-  setState(() => _submitted = true);
+    setState(() => _submitted = true);
 
-  final formValid = _formKey.currentState!.validate();
-  final allValid = formValid && _gender != null && _foodPref != null && _cuisines.isNotEmpty;
-  if (!allValid) return;
+    final formValid = _formKey.currentState!.validate();
+    final allValid = formValid && _gender != null && _foodPref != null && _cuisines.isNotEmpty;
+    if (!allValid) return;
 
-  setState(() => _saving = true);
+    setState(() => _saving = true);
 
-  final otherAllergies = _otherAllergyCtrl.text
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .where((s) => s.isNotEmpty)
-      .toList();
+    final otherAllergies = _otherAllergyCtrl.text
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .where((s) => s.isNotEmpty)
+        .toList();
 
-  final cuisinesToSend = _cuisines.contains('any') ? <String>[] : _cuisines.toList();
+    final cuisinesToSend = _cuisines.contains('any') ? <String>[] : _cuisines.toList();
 
-  final member = FamilyMember(
-    id: widget.existing?.id,
-    name: _nameCtrl.text.trim(),
-    age: int.parse(_ageCtrl.text.trim()),
-    gender: _gender!,
-    allergies: _allergies.toList(),       // chip selections only
-    otherAllergies: otherAllergies,       // free-text field -> anyother_specific_allergy
-    foodPreference: _foodPref!,
-    cuisinePreferences: cuisinesToSend,
-  );
+    final member = FamilyMember(
+      id: widget.existing?.id,
+      name: _nameCtrl.text.trim().replaceAll(RegExp(r'\s+'), ' '),
+      age: int.parse(_ageCtrl.text.trim()),
+      gender: _gender!,
+      allergies: _allergies.toList(),
+      otherAllergies: otherAllergies,
+      foodPreference: _foodPref!,
+      cuisinePreferences: cuisinesToSend,
+    );
 
-  try {
-    final auth = ref.read(authProvider);
-    final userId = auth?.userId ?? demoUserId;
-    final api = ref.read(apiProvider);
-    if (widget.existing == null) {
-      await api.createMember(userId, member);
-    } else {
-      await api.updateMember(widget.existing!.id!, member);
+    try {
+      final userId = ref.read(authProvider)?.userId ?? demoUserId;
+      final api = ref.read(apiProvider);
+      if (widget.existing == null) {
+        await api.createMember(userId, member);
+      } else {
+        await api.updateMember(widget.existing!.id!, member);
+      }
+      ref.invalidate(membersProvider);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
-    ref.invalidate(membersProvider);
-    if (mounted) Navigator.pop(context);
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
-      );
-    }
-  } finally {
-    if (mounted) setState(() => _saving = false);
   }
-}
 }
 
 class _FieldError extends StatelessWidget {

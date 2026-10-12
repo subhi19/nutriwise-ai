@@ -15,6 +15,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import '../services/image_saver.dart';
 import '../models/nutrient_totals.dart';
+import '../widgets/photo_picker.dart';
 
 class MealAnalysisScreen extends ConsumerStatefulWidget {
   const MealAnalysisScreen({super.key});
@@ -37,15 +38,12 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final x = await picker.pickImage(source: source, maxWidth: 1024, imageQuality: 80);
-    if (x != null) {
-      final bytes = await x.readAsBytes();
-      setState(() {
-        _imageBytes = bytes;
-        _result = null;
-      });
-    }
+    final bytes = await pickPhoto(context, source);
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _imageBytes = bytes;
+      _result = null; // clear any previous result on a new photo
+    });
   }
 
   FamilyMember? _effectiveMember(List<FamilyMember> members) {
@@ -67,7 +65,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
   }
 
   Future<void> _openCorrectMealDialog(MealAnalysis current, FamilyMember member) async {
-    // Pre-fill one row per existing detected item, so users edit in place
+    // One pre-filled row per detected item, so users edit in place
     final existingRows = current.items.asMap().entries.map((entry) {
       return {
         'index': entry.key,
@@ -77,24 +75,44 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
       };
     }).toList();
 
-    final newRows = <Map<String, dynamic>>[];
+    final newRows = <Map<String, TextEditingController>>[];
     final hasReviewItems = existingRows.any((r) => r['needsReview'] == true);
+
+    final maxW = MediaQuery.of(context).size.width * 0.8;
+    final dialogWidth = maxW < 420 ? maxW : 420.0;
+    final headerStyle = Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700);
+
+    OutlineInputBorder redBorder() => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.danger, width: 1.4),
+        );
 
     final submitted = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
           title: const Text('Correct Meal'),
           content: SizedBox(
-            width: 420,
+            width: dialogWidth,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Edit detected items or add new ones:',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 12),
+                  Text('Edit detected items or add new ones.', style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 14),
+
+                  // Column headers sit above the boxes, so nothing floats over a border
+                  Row(
+                    children: [
+                      Expanded(flex: 3, child: Text('Dish name', style: headerStyle)),
+                      const SizedBox(width: 8),
+                      Expanded(flex: 2, child: Text('Weight (g)', style: headerStyle)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
 
                   ...existingRows.map((row) {
                     final needsReview = row['needsReview'] as bool;
@@ -108,14 +126,8 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                               controller: row['name'] as TextEditingController,
                               style: TextStyle(color: needsReview ? AppColors.danger : null),
                               decoration: InputDecoration(
-                                labelText: 'Dish name',
-                                labelStyle: TextStyle(color: needsReview ? AppColors.danger : null),
-                                enabledBorder: needsReview
-                                    ? OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(14),
-                                        borderSide: const BorderSide(color: AppColors.danger, width: 1.4),
-                                      )
-                                    : null,
+                                hintText: 'Dish name',
+                                enabledBorder: needsReview ? redBorder() : null,
                               ),
                             ),
                           ),
@@ -125,7 +137,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                             child: TextField(
                               controller: row['weight'] as TextEditingController,
                               keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(labelText: 'Weight (g)'),
+                              decoration: const InputDecoration(hintText: 'grams'),
                             ),
                           ),
                         ],
@@ -133,32 +145,29 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                     );
                   }),
 
-                  ...newRows.asMap().entries.map((entry) {
-                    final row = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: row['name'] as TextEditingController,
-                              decoration: const InputDecoration(labelText: 'New dish name'),
+                  ...newRows.map((row) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                controller: row['name'],
+                                decoration: const InputDecoration(hintText: 'New dish name'),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: row['weight'] as TextEditingController,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(labelText: 'Weight (g)'),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 2,
+                              child: TextField(
+                                controller: row['weight'],
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(hintText: 'grams'),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
+                          ],
+                        ),
+                      )),
 
                   TextButton.icon(
                     icon: const Icon(Icons.add),
@@ -181,7 +190,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              'Items highlighted in red had low confidence or weren\'t matched — please confirm or correct them.',
+                              'Items in red had low confidence or weren\'t matched — please confirm or correct them.',
                               style: TextStyle(fontSize: 12, color: AppColors.danger),
                             ),
                           ),
@@ -204,11 +213,11 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
     if (submitted != true) return;
 
     final corrections = <ItemCorrection>[
-      // Existing items: send a correction only if the user actually changed the name or weight
+      // Existing items: only send a correction if the name or weight actually changed
       for (final row in existingRows)
         if ((row['name'] as TextEditingController).text.trim() != current.items[row['index'] as int].name ||
             double.tryParse((row['weight'] as TextEditingController).text.trim()) !=
-                current.items[row['index'] as int].weightG)
+                current.items[row['index'] as int].weightG.roundToDouble())
           ItemCorrection(
             itemIndex: row['index'] as int,
             name: (row['name'] as TextEditingController).text.trim(),
