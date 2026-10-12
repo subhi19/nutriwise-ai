@@ -1,6 +1,20 @@
-from app.models.user import User, FamilyMemberModel
-from app.database import engine, Base, get_db
-from ai_services.errors import AIServiceError, STATUS_BY_CODE
+import os
+from dotenv import load_dotenv
+load_dotenv() # isort: skip
+
+from dotenv import load_dotenv
+import os
+import json
+from datetime import datetime, timedelta, timezone
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request
+from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, EmailStr
+import bcrypt
+import jwt
+import ai_services
 from ai_services.schemas import (
     FamilyMember,
     MealAnalysis,
@@ -12,23 +26,20 @@ from ai_services.schemas import (
     GroceryListRequest,
     DayPreference,
 )
-import ai_services
-import jwt
-import bcrypt
-from pydantic import BaseModel, EmailStr
-from sqlalchemy.orm import Session
-from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status, Request
-from datetime import datetime, timedelta, timezone
-import json
-import os
+from app.database import engine, Base, get_db
+from app.models.user import User, FamilyMemberModel
+import secrets
+from ai_services.errors import AIServiceError, STATUS_BY_CODE
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
 
-# 1. Load .env first so SUPABASE_URL / GEMINI_API_KEY are available
-load_dotenv()
+
+# Add ai_services directory to sys.path BEFORE any other project imports
+_AI_DIR = str(Path(__file__).resolve().parent.parent.parent /
+              "ai-services" / "ai_services")
+if _AI_DIR not in sys.path:
+    sys.path.insert(0, _AI_DIR)
+
 
 # 2. Add ai-services/ai_services to sys.path BEFORE any ai_services imports
 AI_PKG_DIR = str(Path(__file__).resolve(
@@ -37,17 +48,65 @@ if AI_PKG_DIR not in sys.path:
     sys.path.insert(0, AI_PKG_DIR)
 
 
-# 3. NOW it is safe to import ai_services
 
 
 # Automatically create tables in Supabase if they do not exist
 Base.metadata.create_all(bind=engine)
 
+# ----------------- RATE LIMITING DEFINITION -----------------
+import time
+from starlette.middleware.base import BaseHTTPMiddleware
+
+AI_ENDPOINTS = {
+    "/api/meal/analyze",
+    "/api/meal/correct",
+    "/api/fridge/analyze",
+    "/api/recipes/suggest",
+    "/api/meal-plan/generate",
+    "/api/grocery-list/generate",
+}
+_RATE_LIMIT_STORE: dict[str, list[float]] = {}
+
+class AIRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST" and request.url.path in AI_ENDPOINTS:
+            client_ip = request.client.host if request.client else "127.0.0.1"
+            now = time.time()
+            timestamps = _RATE_LIMIT_STORE.setdefault(client_ip, [])
+            # Keep only timestamps within the last 60 seconds
+            timestamps = [t for t in timestamps if now - t < 60]
+            _RATE_LIMIT_STORE[client_ip] = timestamps
+
+            # Allow max 10 AI calls per minute per IP to protect Gemini quota
+            if len(timestamps) >= 10:
+                raise HTTPException(
+                    status_code=429,
+                    detail="AI rate limit reached (max 10 requests/min). Please try again shortly."
+                )
+            timestamps.append(now)
+
+        return await call_next(request)
+
+
+# ----------------- CREATE APP INSTANCE -----------------
 app = FastAPI(
     title="NutriWise AI API",
-    version="1.0.0",
+    version="2.0.0",
     docs_url="/docs"
 )
+
+# ----------------- ATTACH MIDDLEWARES -----------------
+# Enable CORS for Flutter Web local testing
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Attach rate limiter AFTER app is defined
+app.add_middleware(AIRateLimitMiddleware)
 
 # ----------------- SECURITY & JWT CONFIG -----------------
 JWT_SECRET = os.getenv(
@@ -117,6 +176,22 @@ class TokenResponse(BaseModel):
     name: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    # In development/hackathons, returning the token lets the frontend/tester
+    # test immediately without configuring an SMTP/SendGrid mailer.
+    reset_token: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
 @app.get("/")
 def health_check():
     return {"status": "ok", "app": "NutriWise AI Backend running"}
@@ -156,6 +231,68 @@ def login_user(payload: LoginRequest, db: Session = Depends(get_db)):
         user_id=db_user.id,
         name=db_user.name,
     )
+
+
+@app.post("/auth/forgot-password", response_model=ForgotPasswordResponse)
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+
+    # Security best practice: return a generic success message even if email doesn't exist
+    # to prevent account enumeration attacks.
+    if not user:
+        return ForgotPasswordResponse(
+            message="If this email is registered, password reset instructions have been generated."
+        )
+
+    # Generate a cryptographically secure URL-safe token (valid for 15 minutes)
+    token = secrets.token_urlsafe(32)
+    user.reset_token = token
+    user.reset_token_expires_at = datetime.now(
+        timezone.utc) + timedelta(minutes=15)
+    db.commit()
+
+    # Log to terminal for local dev / testing
+    print(f"\n[AUTH] Password reset requested for {user.email}")
+    print(f"[AUTH] Reset Token: {token}\n")
+
+    return ForgotPasswordResponse(
+        message="If this email is registered, password reset instructions have been generated.",
+        reset_token=token  # Return token directly for local testing
+    )
+
+
+@app.post("/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    # Find user with matching active reset token
+    user = db.query(User).filter(User.reset_token == payload.token).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token."
+        )
+
+    # Verify expiration timestamp
+    now = datetime.now(timezone.utc)
+    if user.reset_token_expires_at is None or user.reset_token_expires_at < now:
+        # Clear expired token
+        user.reset_token = None
+        user.reset_token_expires_at = None
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token has expired. Please request a new one."
+        )
+
+    # Hash new password (72-byte safe limit for bcrypt)
+    user.password_hash = hash_password(payload.new_password)
+
+    # Clear reset token so it cannot be re-used
+    user.reset_token = None
+    user.reset_token_expires_at = None
+    db.commit()
+
+    return {"message": "Password successfully reset. You can now log in with your new password."}
 
 # ----------------- FAMILY MEMBER CRUD ENDPOINTS -----------------
 
@@ -251,6 +388,7 @@ def delete_family_member(member_id: int, db: Session = Depends(get_db)):
     db.commit()
     return None
 
+
 # ----------------- AI CONTRACT ENDPOINTS -----------------
 
 
@@ -325,12 +463,11 @@ async def suggest_recipes_endpoint(payload: RecipeSuggestionPayload):
     )
     return result
 
-
+from typing import Union, Dict, List, Any
 class MealPlanPayload(BaseModel):
     family: list[FamilyMember]
     inventory: FridgeInventory | None = None
-    day_preferences: list[DayPreference] | None = None
-
+    day_preferences: Union[List[DayPreference], Dict[str, Any], None] = None
 
 @app.post("/api/meal-plan/generate", response_model=WeeklyPlan)
 async def generate_meal_plan_endpoint(payload: MealPlanPayload):

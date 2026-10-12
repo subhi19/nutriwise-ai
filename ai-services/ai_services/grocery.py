@@ -29,7 +29,10 @@ import json
 from collections import Counter
 from google.genai import types
 
-from nutrition_repo import search_food
+try:
+    from nutrition_repo import search_food
+except ImportError:
+    from ai_services.nutrition_repo import search_food
 from meal_plan import get_full_week_ingredients
 from gemini_client import client, MODEL_NAME
 from retry_utils import call_with_retry
@@ -96,7 +99,8 @@ Return JSON only: {{"category": "", "quantity": ""}}"""
                 client.models.generate_content(
                     model=MODEL_NAME,
                     contents=[prompt],
-                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"),
                 ).text
             ),
             max_attempts=3,  # shorter than the main calls, this is already a fallback
@@ -128,7 +132,8 @@ def generate_grocery_list(
     counts = Counter(_normalize_name(i) for i in all_mentions)
     display_name = {}
     for i in all_mentions:
-        display_name.setdefault(_normalize_name(i), i)  # keep one nicely-cased name per item
+        # keep one nicely-cased name per item
+        display_name.setdefault(_normalize_name(i), i)
 
     # Step 2: drop anything already in the fridge
     needed = [
@@ -211,15 +216,19 @@ if __name__ == "__main__":
     fake_inventory = FridgeInventory(items=[
         InventoryItem(name="Onion", use_soon=False),
         InventoryItem(name="Tomatoes", use_soon=False),
-        InventoryItem(name="Yellow dal", use_soon=True, expiry_estimate="Use within 3 days"),
+        InventoryItem(name="Yellow dal", use_soon=True,
+                      expiry_estimate="Use within 3 days"),
     ])
     plan_b = generate_meal_plan(fake_family, inventory=fake_inventory)
     grocery_b = generate_grocery_list(
         fake_family, plan_b, inventory=fake_inventory,
-        user_requirements=["Almond flour"],  # not in our DB -> Gemini fallback guesses category/quantity
+        # not in our DB -> Gemini fallback guesses category/quantity
+        user_requirements=["Almond flour"],
     )
-    print(f"Items to buy: {len(grocery_b.items)} (onion, tomatoes, and dal should be MISSING from this list)")
+    print(
+        f"Items to buy: {len(grocery_b.items)} (onion, tomatoes, and dal should be MISSING from this list)")
     for item in grocery_b.items:
         print(f"  [{item.category}] {item.name} — {item.quantity} ({item.source})")
     if grocery_b.not_in_database:
-        print("Used Gemini fallback for (not in our database yet):", grocery_b.not_in_database)
+        print("Used Gemini fallback for (not in our database yet):",
+              grocery_b.not_in_database)

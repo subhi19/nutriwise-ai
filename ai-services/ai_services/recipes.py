@@ -24,14 +24,24 @@ from gemini_client import client, MODEL_NAME
 from retry_utils import call_with_retry
 from nutrition_repo import search_food
 from calculator import calculate_nutrients, add_totals
-from meal_analyzer import estimate_nutrients_with_gemini  # same fallback used everywhere else
+# same fallback used everywhere else
+from meal_analyzer import estimate_nutrients_with_gemini
 from schemas import (
     FridgeInventory, RecipeSuggestions, Recipe, FamilyMember,
     MealIngredient, NutrientTotals,
 )
 
 
-def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> RecipeSuggestions:
+def suggest_recipes(
+    inventory: FridgeInventory,
+    family: list[FamilyMember],
+    avoid_dishes: list[str] | None = None,
+) -> RecipeSuggestions:
+    """
+    avoid_dishes: recipe names the user just rejected ("suggest another").
+    Pass them back in so the new suggestions are different. None for a
+    first-time request.
+    """
     # Separate the "use soon" items so we can ask Gemini to prioritize them
     expiring = [item.name for item in inventory.items if item.use_soon]
     all_items = [item.name for item in inventory.items]
@@ -40,7 +50,16 @@ def suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> R
     all_preferences = set()
     for member in family:
         all_allergies.update(member.allergies)
+        # free-text allergies, treated the same as the fixed list
+        all_allergies.update(member.anyother_specific_allergy)
         all_preferences.update(member.food_preferences)
+
+    avoid_text = ""
+    if avoid_dishes:
+        avoid_text = (
+            "The user did NOT like these recipes, so do NOT suggest them again — "
+            f"give clearly different ones: {', '.join(avoid_dishes)}.\n\n"
+        )
 
     prompt = f"""You are a kitchen assistant. Here is what's in the fridge:
 {', '.join(all_items)}
@@ -50,7 +69,7 @@ These items are close to spoiling and should be prioritized: {', '.join(expiring
 Family restrictions — avoid these allergens completely: {', '.join(all_allergies) or 'none'}
 Food preferences to respect: {', '.join(all_preferences) or 'none'}
 
-Suggest 3 simple recipes using ONLY the ingredients listed above. Do NOT
+{avoid_text}Suggest 3 simple recipes using ONLY the ingredients listed above. Do NOT
 require any ingredient that is not in that list, EXCEPT common pantry
 staples (salt, oil, basic spices, water) which can be assumed available —
 list those separately as "pantry_staples", not as tracked ingredients.
@@ -76,7 +95,8 @@ Return JSON only, no extra text, in this format:
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"),
         )
         return json.loads(response.text)
 
@@ -106,7 +126,8 @@ Return JSON only, no extra text, in this format:
                 ))
                 unmatched.append(name)
 
-        totals = add_totals([ing.nutrients.model_dump() for ing in ingredients])
+        totals = add_totals([ing.nutrients.model_dump()
+                            for ing in ingredients])
 
         recipes.append(Recipe(
             name=raw["name"],
@@ -128,13 +149,15 @@ if __name__ == "__main__":
 
     fake_inventory = FridgeInventory(items=[
         InventoryItem(name="Tomatoes", quantity="4", use_soon=False),
-        InventoryItem(name="Spinach", quantity="1 bunch", use_soon=True, expiry_estimate="Use within 2 days"),
+        InventoryItem(name="Spinach", quantity="1 bunch",
+                      use_soon=True, expiry_estimate="Use within 2 days"),
         InventoryItem(name="Eggs", quantity="6", use_soon=False),
         InventoryItem(name="Paneer", quantity="200g", use_soon=False),
     ])
 
     fake_family = [
-        FamilyMember(name="Test User", age=30, gender="female", food_preferences=["vegetarian"])
+        FamilyMember(name="Test User", age=30, gender="female",
+                     food_preferences=["vegetarian"])
     ]
 
     result = suggest_recipes(fake_inventory, fake_family)
@@ -144,10 +167,12 @@ if __name__ == "__main__":
         print(f"\n{recipe.name}  —  total: {recipe.total_nutrients.calories} kcal, "
               f"protein: {recipe.total_nutrients.protein_g}g")
         for ing in recipe.ingredients:
-            print(f"  - {ing.name}: {ing.weight_g}g, {ing.nutrients.calories} kcal")
+            print(
+                f"  - {ing.name}: {ing.weight_g}g, {ing.nutrients.calories} kcal")
         if recipe.pantry_staples:
             print(f"  Pantry staples: {', '.join(recipe.pantry_staples)}")
         if recipe.unmatched_ingredients:
-            print(f"  (used Gemini fallback for: {', '.join(recipe.unmatched_ingredients)})")
+            print(
+                f"  (used Gemini fallback for: {', '.join(recipe.unmatched_ingredients)})")
         for i, step in enumerate(recipe.steps, 1):
             print(f"  {i}. {step}")

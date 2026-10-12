@@ -23,6 +23,7 @@ class FamilyMember(BaseModel):
     age: int
     gender: str
     allergies: list[str] = []            # e.g. "milk", "peanut", "egg"
+    # free-text allergies not covered by the fixed list
     anyother_specific_allergy: list[str] = []
     food_preferences: list[str] = []     # e.g. "vegetarian"
     # e.g. "Indian", "Italian", "Chinese"; empty = any cuisine

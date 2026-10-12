@@ -1,6 +1,14 @@
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
     "python.analysis.extraPaths": [
-        "./ai-services"
+        "${workspaceFolder}/ai-services/ai_services",
+        "${workspaceFolder}/../ai-services/ai_services",
+        "${workspaceFolder}/backend",
+        "${workspaceFolder}"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}/ai-services/ai_services",
+        "${workspaceFolder}/../ai-services/ai_services",
+        "${workspaceFolder}/backend",
+        "${workspaceFolder}"
     ]
 }

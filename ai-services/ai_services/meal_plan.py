@@ -32,13 +32,33 @@ from gemini_client import client, MODEL_NAME
 from retry_utils import call_with_retry
 from nutrition_repo import search_food
 from calculator import calculate_nutrients, add_totals
-from meal_analyzer import estimate_nutrients_with_gemini  # reused fallback, same as meal_analyzer.py
+# reused fallback, same as meal_analyzer.py
+from meal_analyzer import estimate_nutrients_with_gemini
 from schemas import (
     FamilyMember, FridgeInventory, WeeklyPlan, DayPlan, PlannedMeal,
     MealIngredient, NutrientTotals, DayPreference,
 )
 
-DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+DAYS = ["Monday", "Tuesday", "Wednesday",
+        "Thursday", "Friday", "Saturday", "Sunday"]
+
+# The frontend's 11 meal type dropdown options (IATA-style special meal
+# codes). DayPreference.meal_type receives the short CODE (e.g. "VJML").
+# Gemini doesn't know what "VJML" means, so we translate it into a clear
+# instruction before it goes into the prompt.
+MEAL_TYPE_INFO = {
+    "MOML": ("Muslim Meal", "Halal — no pork, no alcohol"),
+    "HNML": ("Hindu Non-Vegetarian Meal", "Indian-style, no beef or pork"),
+    "VJML": ("Vegetarian Jain Meal", "Strictly plant-based, and NO root vegetables at all (no onion, garlic, potato, carrot, radish)"),
+    "VLML": ("Vegetarian Lacto-Ovo Meal", "Vegetarian, may include eggs and dairy"),
+    "VGML": ("Vegan Meal", "Fully plant-based — no meat, dairy, eggs, or honey"),
+    "KSML": ("Kosher Meal", "Prepared to Jewish dietary laws"),
+    "FPML": ("Fruit Platter Meal", "Fresh seasonal fruit only, no cooked dishes"),
+    "SFML": ("Seafood Meal", "Seafood-based dishes throughout"),
+    "AVML": ("Asian Vegetarian Meal", "Indian-style vegetarian"),
+    "RVML": ("Raw Vegetarian Meal", "Uncooked plant-based ingredients only"),
+    "VOML": ("Vegetarian Oriental Meal", "Asian-style vegetarian"),
+}
 
 
 def _summarize_family(family: list[FamilyMember]) -> dict:
@@ -50,6 +70,8 @@ def _summarize_family(family: list[FamilyMember]) -> dict:
 
     for member in family:
         allergies.update(member.allergies)
+        # free-text allergies, treated the same as the fixed list
+        allergies.update(member.anyother_specific_allergy)
         preferences.update(member.food_preferences)
         cuisines.update(member.cuisine_preferences)
 
@@ -64,7 +86,13 @@ def _format_day_preference(dp: DayPreference) -> str:
     """Combines whichever fields are set into one readable line for the prompt."""
     parts = []
     if dp.meal_type:
-        parts.append(f"meal type: {dp.meal_type}")
+        info = MEAL_TYPE_INFO.get(dp.meal_type.upper())
+        if info:
+            name, rule = info
+            parts.append(f"meal type: {name} — STRICTLY: {rule}")
+        else:
+            # Unknown code — pass it through as-is rather than failing
+            parts.append(f"meal type: {dp.meal_type}")
     if dp.cuisine:
         parts.append(f"cuisine: {dp.cuisine}")
     if dp.preference:
@@ -72,7 +100,12 @@ def _format_day_preference(dp: DayPreference) -> str:
     return ", ".join(parts) if parts else "no specific request"
 
 
-def _build_prompt(summary: dict, inventory: FridgeInventory | None, day_preferences: list[DayPreference] | None) -> str:
+def _build_prompt(
+    summary: dict,
+    inventory: FridgeInventory | None,
+    day_preferences: list[DayPreference] | None,
+    avoid_dishes: list[str] | None = None,
+) -> str:
     lines = [
         "You are a meal planning assistant. Create a 7-day meal plan",
         "(Monday to Sunday), each with breakfast, lunch, dinner, and an",
@@ -89,9 +122,11 @@ def _build_prompt(summary: dict, inventory: FridgeInventory | None, day_preferen
 
     if inventory and inventory.items:
         item_names = [item.name for item in inventory.items]
-        use_soon_names = [item.name for item in inventory.items if item.use_soon]
+        use_soon_names = [
+            item.name for item in inventory.items if item.use_soon]
         lines.append("")
-        lines.append(f"Ingredients already available at home: {', '.join(item_names)}")
+        lines.append(
+            f"Ingredients already available at home: {', '.join(item_names)}")
         if use_soon_names:
             lines.append(
                 f"IMPORTANT: these are close to spoiling and should be used in the "
@@ -112,6 +147,14 @@ def _build_prompt(summary: dict, inventory: FridgeInventory | None, day_preferen
         )
         for dp in day_preferences:
             lines.append(f"  {dp.day}: {_format_day_preference(dp)}")
+
+    if avoid_dishes:
+        lines.append("")
+        lines.append(
+            "The user already saw a plan and did NOT like it. Do NOT use any of these "
+            "dishes again — suggest clearly different dishes instead: "
+            f"{', '.join(avoid_dishes)}."
+        )
 
     lines.append("")
     lines.append(
@@ -247,15 +290,22 @@ def generate_meal_plan(
     family: list[FamilyMember],
     inventory: FridgeInventory | None = None,
     day_preferences: list[DayPreference] | None = None,
+    avoid_dishes: list[str] | None = None,
 ) -> WeeklyPlan:
+    """
+    avoid_dishes: dish names from a plan the user just rejected ("Create new
+    plan"). Pass them back in so the new plan uses different dishes. Leave
+    as None for a first-time plan.
+    """
     summary = _summarize_family(family)
-    prompt = _build_prompt(summary, inventory, day_preferences)
+    prompt = _build_prompt(summary, inventory, day_preferences, avoid_dishes)
 
     def make_request():
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[prompt],
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"),
         )
         return json.loads(response.text)
 
@@ -266,7 +316,8 @@ def generate_meal_plan(
         breakfast, un1 = _build_meal(d["breakfast"])
         lunch, un2 = _build_meal(d["lunch"])
         dinner, un3 = _build_meal(d["dinner"])
-        snack, un4 = (_build_meal(d["snack"]) if d.get("snack") else (None, []))
+        snack, un4 = (_build_meal(d["snack"])
+                      if d.get("snack") else (None, []))
 
         meals = [m for m in [breakfast, lunch, dinner, snack] if m]
         day_totals = add_totals([m.nutrients.model_dump() for m in meals])
@@ -311,16 +362,21 @@ if __name__ == "__main__":
     plan = generate_meal_plan(fake_family, inventory=None)
     for day in plan.days[:1]:  # just show 1 day to keep it readable
         print(f"\n{day.day}  —  total: {day.nutrients.calories} kcal")
-        print(f"  Breakfast: {day.breakfast.name} ({day.breakfast.nutrients.calories} kcal)")
+        print(
+            f"  Breakfast: {day.breakfast.name} ({day.breakfast.nutrients.calories} kcal)")
         for ing in day.breakfast.ingredients:
-            print(f"    - {ing.name}: {ing.weight_g}g, {ing.nutrients.calories} kcal")
-        print(f"  Lunch: {day.lunch.name} ({day.lunch.nutrients.calories} kcal)")
-        print(f"  Dinner: {day.dinner.name} ({day.dinner.nutrients.calories} kcal)")
+            print(
+                f"    - {ing.name}: {ing.weight_g}g, {ing.nutrients.calories} kcal")
+        print(
+            f"  Lunch: {day.lunch.name} ({day.lunch.nutrients.calories} kcal)")
+        print(
+            f"  Dinner: {day.dinner.name} ({day.dinner.nutrients.calories} kcal)")
     print("\nPlan notes:", plan.notes)
 
     print("\n\n=== Plan with fridge inventory (Fridge screen) ===")
     fake_inventory = FridgeInventory(items=[
-        InventoryItem(name="Spinach", use_soon=True, expiry_estimate="Use within 2 days"),
+        InventoryItem(name="Spinach", use_soon=True,
+                      expiry_estimate="Use within 2 days"),
         InventoryItem(name="Paneer", use_soon=False),
     ])
     plan2 = generate_meal_plan(fake_family, inventory=fake_inventory)
@@ -332,14 +388,17 @@ if __name__ == "__main__":
     print(f"  Dinner: {day.dinner.name}")
     print("Plan notes:", plan2.notes)
     if day.unmatched_ingredients:
-        print("Ingredients that used the Gemini fallback (not in our DB):", day.unmatched_ingredients)
+        print("Ingredients that used the Gemini fallback (not in our DB):",
+              day.unmatched_ingredients)
 
     print("\n\n=== Plan with day-specific preferences ===")
     day_prefs = [
-        DayPreference(day="Friday", meal_type="Non-Vegetarian", cuisine="Chinese"),
+        DayPreference(day="Friday", meal_type="Non-Vegetarian",
+                      cuisine="Chinese"),
         DayPreference(day="Sunday", preference="light dinner, low oil"),
     ]
-    plan3 = generate_meal_plan(fake_family, inventory=None, day_preferences=day_prefs)
+    plan3 = generate_meal_plan(
+        fake_family, inventory=None, day_preferences=day_prefs)
     for day in plan3.days:
         if day.day in ("Friday", "Sunday"):
             print(f"\n{day.day}  —  total: {day.nutrients.calories} kcal")
@@ -347,4 +406,5 @@ if __name__ == "__main__":
 
     print("\n\n=== Whole week's ingredients, combined ===")
     week_list = get_full_week_ingredients(plan3)
-    print(f"({len(week_list)} unique ingredients): {', '.join(week_list[:10])}...")
+    print(
+        f"({len(week_list)} unique ingredients): {', '.join(week_list[:10])}...")
