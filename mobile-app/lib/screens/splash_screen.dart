@@ -86,7 +86,7 @@ class SplashScreen extends StatelessWidget {
                           color: Colors.transparent,
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
-                            onTap: () => context.go('/profile'),
+                            onTap: () => context.go('/login'),
                             child: const Center(
                               child: Text('Explore Now!',
                                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white)),

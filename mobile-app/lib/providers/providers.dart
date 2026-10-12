@@ -9,7 +9,9 @@ import '../models/meal_plan.dart';
 // Flip to false once ready to hit the real backend
 const useMock = true;
 
-final apiProvider = Provider<NutriApi>((ref) => useMock ? MockApi() : RealApi());
+final apiProvider = Provider<NutriApi>((ref) => useMock
+    ? MockApi()
+    : RealApi(tokenProvider: () => ref.read(authProvider)?.accessToken));
 
 // Holds the logged-in session once /auth/login succeeds.
 // TODO: persist accessToken via flutter_secure_storage so it survives app restarts.

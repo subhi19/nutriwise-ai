@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../core/theme.dart';
-import '../models/family_member.dart';
+import '../core/validators.dart';
 import '../providers/providers.dart';
+import '../services/api_service.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_logo.dart';
-
-final _emailRegex = RegExp(
-  r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$",
-);
+import '../widgets/inline_error.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -41,80 +38,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final session = await ref.read(apiProvider).login(_emailCtrl.text.trim(), _pwdCtrl.text);
       ref.read(authProvider.notifier).state = session;
-
-      final List<FamilyMember> members = await ref.read(membersProvider.future);
       if (!mounted) return;
-      context.go(members.isEmpty ? '/profile' : '/dashboard');
+      context.go('/profile');
     } catch (e) {
-      if (mounted) setState(() => _loginError = e.toString());
+      if (mounted) {
+        setState(() => _loginError = e is ApiException ? e.message : 'Something went wrong. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  void _showForgotPasswordDialog() {
-    final emailCtrl = TextEditingController(text: _emailCtrl.text);
-    final formKey = GlobalKey<FormState>();
-    bool sending = false;
-    String? resultMessage;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Reset Password'),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Enter your email and we\'ll send you reset instructions.'),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline)),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Enter your email';
-                    if (!_emailRegex.hasMatch(v.trim())) return 'Enter a valid email address';
-                    return null;
-                  },
-                ),
-                if (resultMessage != null) ...[
-                  const SizedBox(height: 12),
-                  Text(resultMessage!, style: const TextStyle(color: AppColors.primary)),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-            TextButton(
-              onPressed: sending
-                  ? null
-                  : () async {
-                      if (!formKey.currentState!.validate()) return;
-                      setDialogState(() => sending = true);
-                      try {
-                        await ref.read(apiProvider).forgotPassword(emailCtrl.text.trim());
-                      } catch (_) {
-                        // Intentionally shown the same generic message either way —
-                        // never reveal whether an email is registered.
-                      }
-                      setDialogState(() {
-                        sending = false;
-                        resultMessage = 'If an account exists for that email, we\'ve sent reset instructions.';
-                      });
-                    },
-              child: sending
-                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Send'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -141,11 +73,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     controller: _emailCtrl,
                     keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline)),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Enter your email';
-                      if (!_emailRegex.hasMatch(v.trim())) return 'Enter a valid email address';
-                      return null;
-                    },
+                    validator: Validators.email,
                   ),
                   const SizedBox(height: 14),
                   TextFormField(
@@ -163,29 +91,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   if (_loginError != null) ...[
                     const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.danger.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(_loginError!, style: const TextStyle(color: AppColors.danger, fontSize: 13)),
-                          ),
-                        ],
-                      ),
-                    ),
+                    InlineError(_loginError!),
                   ],
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: _showForgotPasswordDialog,
+                      onPressed: () => context.push('/forgot-password'),
                       child: const Text('Forgot Password?'),
                     ),
                   ),
@@ -194,7 +106,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     onPressed: _loading ? null : _login,
                     child: _loading
                         ? const SizedBox(
-                            height: 20, width: 20,
+                            height: 20,
+                            width: 20,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Text('Log In'),
                   ),
