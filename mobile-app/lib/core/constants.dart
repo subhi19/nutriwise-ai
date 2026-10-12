@@ -18,16 +18,16 @@ class AppVocab {
   ];
 
   static const cuisinePreferences = [
-  'indian', 'chinese', 'italian', 'continental', 'malaysian',
-];
+  'indian', 'chinese', 'italian', 'continental', 'mexican', 'malaysian',
+  ];
 
   // UI-only: "any" maps to an empty list when sent to the backend,
   // per the AI contract ("empty cuisine_preferences = any cuisine").
   // Letting the user explicitly pick "Any" lets the field be mandatory
   // in the form while preserving that contract behavior.
   static const cuisineOptionsForUI = [
-  'any', 'indian', 'chinese', 'italian', 'continental', 'malaysian',
-];
+  'any', 'indian', 'chinese', 'italian', 'continental', 'mexican', 'malaysian',
+  ];
 
   static String cuisineLabel(String value) =>
       value == 'any' ? 'Any Cuisine' : displayLabel(value);

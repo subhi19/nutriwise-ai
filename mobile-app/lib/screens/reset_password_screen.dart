@@ -10,7 +10,7 @@ import '../widgets/app_logo.dart';
 import '../widgets/inline_error.dart';
 
 class ResetPasswordScreen extends ConsumerStatefulWidget {
-  final String? initialEmail;
+  final String? initialEmail; // only used for the banner text
   final String? initialToken;
   const ResetPasswordScreen({super.key, this.initialEmail, this.initialToken});
 
@@ -20,7 +20,6 @@ class ResetPasswordScreen extends ConsumerStatefulWidget {
 
 class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _emailCtrl;
   late final TextEditingController _tokenCtrl;
   final _pwdCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
@@ -31,13 +30,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   @override
   void initState() {
     super.initState();
-    _emailCtrl = TextEditingController(text: widget.initialEmail ?? '');
     _tokenCtrl = TextEditingController(text: widget.initialToken ?? '');
   }
 
   @override
   void dispose() {
-    _emailCtrl.dispose();
     _tokenCtrl.dispose();
     _pwdCtrl.dispose();
     _confirmCtrl.dispose();
@@ -51,7 +48,6 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 
     try {
       await ref.read(apiProvider).resetPassword(
-            email: _emailCtrl.text.trim(),
             token: _tokenCtrl.text.trim(),
             newPassword: _pwdCtrl.text,
           );
@@ -71,7 +67,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final hasEmail = (widget.initialEmail ?? '').isNotEmpty;
+    final email = widget.initialEmail ?? '';
 
     return Scaffold(
       body: AppBackground(
@@ -91,7 +87,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                   const SizedBox(height: 6),
                   Text('Choose a new password for your account.',
                       textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
-                  if (hasEmail) ...[
+                  if (email.isNotEmpty) ...[
                     const SizedBox(height: 14),
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -105,8 +101,8 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'If ${widget.initialEmail} has an account, we\'ve sent reset instructions. '
-                              'Enter the code from the email below.',
+                              'If $email has an account, a reset code has been generated. '
+                              'It\'s valid for 15 minutes.',
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
@@ -115,13 +111,6 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                     ),
                   ],
                   const SizedBox(height: 22),
-                  TextFormField(
-                    controller: _emailCtrl,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline)),
-                    validator: Validators.email,
-                  ),
-                  const SizedBox(height: 14),
                   TextFormField(
                     controller: _tokenCtrl,
                     decoration: const InputDecoration(

@@ -2,23 +2,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import '../models/auth_session.dart';
 import '../models/family_member.dart';
-import '../services/api_service.dart';
 import '../models/fridge_inventory.dart';
 import '../models/meal_plan.dart';
+import '../services/api_service.dart';
 
-// Flip to false once ready to hit the real backend
-const useMock = true;
+// Mock by default, so nobody ships mock data by accident.
+// Go live with:  --dart-define=USE_MOCK=false
+const useMock = bool.fromEnvironment('USE_MOCK', defaultValue: true);
 
 final apiProvider = Provider<NutriApi>((ref) => useMock
     ? MockApi()
     : RealApi(tokenProvider: () => ref.read(authProvider)?.accessToken));
 
-// Holds the logged-in session once /auth/login succeeds.
-// TODO: persist accessToken via flutter_secure_storage so it survives app restarts.
+// The logged-in session. Held in memory only (lost on browser refresh).
 final authProvider = StateProvider<AuthSession?>((ref) => null);
-final selectedMemberProvider = StateProvider<FamilyMember?>((ref) => null);
 
-// Seeded test account's user_id, used as a fallback before real login is exercised.
+// Falls back to the seeded test account when nobody has logged in.
 const demoUserId = 1;
 
 final membersProvider = FutureProvider<List<FamilyMember>>((ref) {
@@ -27,8 +26,9 @@ final membersProvider = FutureProvider<List<FamilyMember>>((ref) {
   return ref.read(apiProvider).getMembers(userId);
 });
 
-// Confirmed fridge inventory + generated plan + who the plan was for.
-// Kept so the Grocery List screen can use the same data.
+final selectedMemberProvider = StateProvider<FamilyMember?>((ref) => null);
+
+// Carried from the Meal Planner to the Grocery List screen
 final fridgeInventoryProvider = StateProvider<FridgeInventory?>((ref) => null);
 final currentPlanProvider = StateProvider<WeeklyPlan?>((ref) => null);
 final planFamilyProvider = StateProvider<List<FamilyMember>>((ref) => []);
