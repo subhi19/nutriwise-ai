@@ -67,26 +67,29 @@ AI_ENDPOINTS = {
 }
 _RATE_LIMIT_STORE: dict[str, list[float]] = {}
 
+# Demo day friendly: 30 calls per minute, keyed by User Token (fallback to IP)
+MAX_REQUESTS_PER_MINUTE = 30 
+
 class AIRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "POST" and request.url.path in AI_ENDPOINTS:
-            client_ip = request.client.host if request.client else "127.0.0.1"
-            now = time.time()
-            timestamps = _RATE_LIMIT_STORE.setdefault(client_ip, [])
-            # Keep only timestamps within the last 60 seconds
-            timestamps = [t for t in timestamps if now - t < 60]
-            _RATE_LIMIT_STORE[client_ip] = timestamps
+            # Key by Bearer token if logged in, else client IP
+            auth_header = request.headers.get("Authorization", "")
+            client_key = auth_header if auth_header.startswith("Bearer ") else (request.client.host if request.client else "127.0.0.1")
 
-            # Allow max 10 AI calls per minute per IP to protect Gemini quota
-            if len(timestamps) >= 10:
+            now = time.time()
+            timestamps = _RATE_LIMIT_STORE.setdefault(client_key, [])
+            timestamps = [t for t in timestamps if now - t < 60]
+            _RATE_LIMIT_STORE[client_key] = timestamps
+
+            if len(timestamps) >= MAX_REQUESTS_PER_MINUTE:
                 raise HTTPException(
                     status_code=429,
-                    detail="AI rate limit reached (max 10 requests/min). Please try again shortly."
+                    detail="AI rate limit reached (max 30 requests/min). Please try again shortly."
                 )
             timestamps.append(now)
 
         return await call_next(request)
-
 
 # ----------------- CREATE APP INSTANCE -----------------
 app = FastAPI(
@@ -233,31 +236,29 @@ def login_user(payload: LoginRequest, db: Session = Depends(get_db)):
     )
 
 
+# Check environment flag (defaults to True for local testing/hackathon demo)
+EXPOSE_RESET_TOKEN = os.getenv("EXPOSE_RESET_TOKEN", "true").lower() == "true"
+
 @app.post("/auth/forgot-password", response_model=ForgotPasswordResponse)
 def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == payload.email).first()
 
-    # Security best practice: return a generic success message even if email doesn't exist
-    # to prevent account enumeration attacks.
     if not user:
         return ForgotPasswordResponse(
             message="If this email is registered, password reset instructions have been generated."
         )
 
-    # Generate a cryptographically secure URL-safe token (valid for 15 minutes)
     token = secrets.token_urlsafe(32)
     user.reset_token = token
-    user.reset_token_expires_at = datetime.now(
-        timezone.utc) + timedelta(minutes=15)
+    user.reset_token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
     db.commit()
 
-    # Log to terminal for local dev / testing
     print(f"\n[AUTH] Password reset requested for {user.email}")
     print(f"[AUTH] Reset Token: {token}\n")
 
     return ForgotPasswordResponse(
         message="If this email is registered, password reset instructions have been generated.",
-        reset_token=token  # Return token directly for local testing
+        reset_token=token if EXPOSE_RESET_TOKEN else None  # Hidden when EXPOSE_RESET_TOKEN=false
     )
 
 
