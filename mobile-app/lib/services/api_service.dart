@@ -1,17 +1,19 @@
-import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
-import '../models/auth_session.dart';
-import '../models/family_member.dart';
-import 'dart:typed_data';
 import 'dart:convert';
-import '../models/meal_analysis.dart';
-import '../models/nutrient_totals.dart';
+import 'dart:typed_data';
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+import '../models/auth_session.dart';
 import '../models/day_preference.dart';
+import '../models/family_member.dart';
 import '../models/fridge_inventory.dart';
+import '../models/grocery_list.dart';
+import '../models/meal_analysis.dart';
 import '../models/meal_plan.dart';
 import '../models/meal_type.dart';
-import '../models/grocery_list.dart';
+import '../models/nutrient_totals.dart';
 import '../models/recipe.dart';
+
+const kApiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
 
 // Flip to true once AI/backend confirm they accept `day_preferences`.
 const kSendDayPreferences = false;
@@ -49,7 +51,7 @@ abstract class NutriApi {
   Future<void> register(String name, String email, String password);
   Future<void> deleteMember(String memberId);
   Future<String?> forgotPassword(String email); // returns a reset code only if the server includes one
-  Future<void> resetPassword({required String email, required String token, required String newPassword});
+  Future<void> resetPassword({required String token, required String newPassword});
   Future<List<FamilyMember>> getMembers(int userId);
   Future<FamilyMember> createMember(int userId, FamilyMember member);
   Future<FamilyMember> updateMember(String memberId, FamilyMember member);
@@ -121,7 +123,7 @@ class MockApi implements NutriApi {
   }
 
   @override
-  Future<void> resetPassword({required String email, required String token, required String newPassword}) async {
+  Future<void> resetPassword({required String token, required String newPassword}) async {
     await Future.delayed(const Duration(milliseconds: 600));
     if (token.trim().toUpperCase() != 'MOCK-1234') {
       throw ApiException(code: 'AUTH_ERROR', message: 'That reset code is invalid or has expired.', retry: false);
@@ -361,6 +363,24 @@ class MockApi implements NutriApi {
   }
 }
 
+// ---------- Live-contract switch ----------
+
+/// /api/meal/correct: our AI contract says `corrections` is a list of
+/// {item_index, name, weight_g}. The backend's example showed a plain sentence.
+/// Check MealCorrectionPayload in Swagger (/docs). If it says "string", set this to true.
+const kCorrectionsAsText = false;
+
+String _correctionsToText(MealAnalysis prev, List<ItemCorrection> cs) {
+  return cs.map((c) {
+    final w = c.weightG == null ? '' : ' (${c.weightG!.round()} g)';
+    final i = c.itemIndex;
+    if (i != null && i >= 0 && i < prev.items.length) {
+      return 'Replaced "${prev.items[i].name}" with "${c.name}"$w';
+    }
+    return 'Added "${c.name}"$w';
+  }).join('; ');
+}
+
 // ---------- Real implementation ----------
 
 class RealApi implements NutriApi {
@@ -379,23 +399,30 @@ class RealApi implements NutriApi {
   }
 
   final Dio _dio = Dio(BaseOptions(
-    baseUrl: 'http://localhost:8000',
+    baseUrl: kApiBaseUrl,
     connectTimeout: const Duration(seconds: 30),
     receiveTimeout: const Duration(seconds: 30),
   ));
 
   Never _handleError(DioException e) {
+    final status = e.response?.statusCode;
     final data = e.response?.data;
 
-    if (data is Map<String, dynamic>) {
-      if (data.containsKey('error')) throw ApiException.fromAiEnvelope(data);
+    if (status == 429) {
+      throw ApiException(
+        code: 'RATE_LIMITED',
+        message: 'You\'re going a little fast! Please wait a minute and try again.',
+        retry: true,
+      );
+    }
 
+    if (data is Map<String, dynamic>) {
+      if (data['error'] is Map) throw ApiException.fromAiEnvelope(data);
       final detail = data['detail'];
       if (detail is String) throw ApiException.fromDetail(detail);
-
-      // FastAPI validation errors: detail is a list of {loc, msg, type}
       if (detail is List) {
-        debugPrint('Validation error from server: $detail'); // technical detail for you, not the user
+        // FastAPI validation errors. The technical detail goes to the console for you.
+        debugPrint('Validation error from server: $detail');
         throw ApiException(
           code: 'INVALID_INPUT',
           message: 'Some details look invalid. Please check your entries and try again.',
@@ -421,6 +448,8 @@ class RealApi implements NutriApi {
     );
   }
 
+  // ---- Auth ----
+
   @override
   Future<AuthSession> login(String email, String password) async {
     try {
@@ -435,46 +464,6 @@ class RealApi implements NutriApi {
   Future<void> register(String name, String email, String password) async {
     try {
       await _dio.post('/auth/register', data: {'name': name, 'email': email, 'password': password});
-    } on DioException catch (e) {
-      _handleError(e);
-    }
-  }
-
-  @override
-  Future<List<FamilyMember>> getMembers(int userId) async {
-    try {
-      final res = await _dio.get('/api/family/members', queryParameters: {'user_id': userId});
-      return (res.data as List).map((e) => FamilyMember.fromJson(e)).toList();
-    } on DioException catch (e) {
-      _handleError(e);
-    }
-  }
-
-  @override
-  Future<FamilyMember> createMember(int userId, FamilyMember member) async {
-    try {
-      final res = await _dio.post('/api/family/members',
-          queryParameters: {'user_id': userId}, data: member.toJson());
-      return FamilyMember.fromJson(res.data);
-    } on DioException catch (e) {
-      _handleError(e);
-    }
-  }
-
-  @override
-  Future<FamilyMember> updateMember(String memberId, FamilyMember member) async {
-    try {
-      final res = await _dio.put('/api/family/members/$memberId', data: member.toJson());
-      return FamilyMember.fromJson(res.data);
-    } on DioException catch (e) {
-      _handleError(e);
-    }
-  }
-
-  @override
-  Future<void> deleteMember(String memberId) async {
-    try {
-      await _dio.delete('/api/family/members/$memberId');
     } on DioException catch (e) {
       _handleError(e);
     }
@@ -496,18 +485,57 @@ class RealApi implements NutriApi {
   }
 
   @override
-  Future<void> resetPassword({required String email, required String token, required String newPassword}) async {
+  Future<void> resetPassword({required String token, required String newPassword}) async {
     try {
-      // TODO: match these three keys to the ResetPasswordRequest schema in Swagger (/docs).
-      await _dio.post('/auth/reset-password', data: {
-        'email': email,
-        'token': token,
-        'new_password': newPassword,
-      });
+      await _dio.post('/auth/reset-password', data: {'token': token, 'new_password': newPassword});
     } on DioException catch (e) {
       _handleError(e);
     }
   }
+
+  // ---- Family ----
+
+  @override
+  Future<List<FamilyMember>> getMembers(int userId) async {
+    try {
+      final res = await _dio.get('/api/family/members', queryParameters: {'user_id': userId});
+      return (res.data as List).map((e) => FamilyMember.fromJson(Map<String, dynamic>.from(e))).toList();
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<FamilyMember> createMember(int userId, FamilyMember member) async {
+    try {
+      final res = await _dio.post('/api/family/members',
+          queryParameters: {'user_id': userId}, data: member.toJson());
+      return FamilyMember.fromJson(Map<String, dynamic>.from(res.data));
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<FamilyMember> updateMember(String memberId, FamilyMember member) async {
+    try {
+      final res = await _dio.put('/api/family/members/$memberId', data: member.toJson());
+      return FamilyMember.fromJson(Map<String, dynamic>.from(res.data));
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<void> deleteMember(String memberId) async {
+    try {
+      await _dio.delete('/api/family/members/$memberId');
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  // ---- AI features ----
 
   @override
   Future<MealAnalysis> analyzeMeal(Uint8List image, FamilyMember member) async {
@@ -516,8 +544,8 @@ class RealApi implements NutriApi {
       'member_data': jsonEncode(member.toJson()),
     });
     try {
-      final res = await _dio.post('/api/meal/analyze', data: form,
-          options: Options(receiveTimeout: const Duration(seconds: 90)));
+      final res = await _dio.post('/api/meal/analyze',
+          data: form, options: Options(receiveTimeout: const Duration(seconds: 90)));
       return MealAnalysis.fromJson(res.data);
     } on DioException catch (e) {
       _handleError(e);
@@ -525,15 +553,18 @@ class RealApi implements NutriApi {
   }
 
   @override
-  Future<MealAnalysis> correctMeal(MealAnalysis previous, List<ItemCorrection> corrections, FamilyMember member) async {
+  Future<MealAnalysis> correctMeal(
+      MealAnalysis previous, List<ItemCorrection> corrections, FamilyMember member) async {
+    final Object payloadCorrections = kCorrectionsAsText
+        ? _correctionsToText(previous, corrections)
+        : corrections.map((c) => c.toJson()).toList();
     try {
-      final res = await _dio.post('/api/meal/correct', data: {
-        'request_data': {
-          'previous': previous.toJson(),
-          'corrections': corrections.map((c) => c.toJson()).toList(),
-        },
-        'member': member.toJson(),
-      });
+      final res = await _dio.post('/api/meal/correct',
+          data: {
+            'request_data': {'previous': previous.toJson(), 'corrections': payloadCorrections},
+            'member': member.toJson(),
+          },
+          options: Options(receiveTimeout: const Duration(seconds: 90)));
       return MealAnalysis.fromJson(res.data);
     } on DioException catch (e) {
       _handleError(e);
@@ -546,9 +577,24 @@ class RealApi implements NutriApi {
       'image': MultipartFile.fromBytes(image, filename: 'fridge.jpg'),
     });
     try {
-      final res = await _dio.post('/api/fridge/analyze', data: form,
-          options: Options(receiveTimeout: const Duration(seconds: 90)));
+      final res = await _dio.post('/api/fridge/analyze',
+          data: form, options: Options(receiveTimeout: const Duration(seconds: 90)));
       return FridgeInventory.fromJson(res.data);
+    } on DioException catch (e) {
+      _handleError(e);
+    }
+  }
+
+  @override
+  Future<RecipeSuggestions> suggestRecipes(FridgeInventory inventory, List<FamilyMember> family) async {
+    try {
+      final res = await _dio.post('/api/recipes/suggest',
+          data: {
+            'inventory': inventory.toRequestJson(),
+            'family': family.map((m) => m.toJson()).toList(),
+          },
+          options: Options(receiveTimeout: const Duration(seconds: 90)));
+      return RecipeSuggestions.fromJson(res.data);
     } on DioException catch (e) {
       _handleError(e);
     }
@@ -557,14 +603,13 @@ class RealApi implements NutriApi {
   @override
   Future<WeeklyPlan> generateMealPlan(
       List<FamilyMember> family, FridgeInventory? inventory, List<DayPreference> dayPreferences) async {
-    final body = <String, dynamic>{
-      'family': family.map((m) => m.toJson()).toList(),
-      'inventory': inventory?.toJson(),
-      if (kSendDayPreferences)
-        'day_preferences': {for (final dp in dayPreferences) dp.day: dp.toJson()},
-    };
     try {
-      final res = await _dio.post('/api/meal-plan/generate', data: body,
+      final res = await _dio.post('/api/meal-plan/generate',
+          data: {
+            'family': family.map((m) => m.toJson()).toList(),
+            'inventory': inventory?.toRequestJson(),
+            'day_preferences': dayPreferences.map((d) => d.toJson()).toList(),
+          },
           options: Options(receiveTimeout: const Duration(seconds: 90)));
       return WeeklyPlan.fromJson(res.data);
     } on DioException catch (e) {
@@ -580,26 +625,11 @@ class RealApi implements NutriApi {
           data: {
             'family': family.map((m) => m.toJson()).toList(),
             'plan': plan.toJson(),
-            'inventory': inventory?.toJson(),
+            'inventory': inventory?.toRequestJson(),
             'user_requirements': userRequirements,
           },
           options: Options(receiveTimeout: const Duration(seconds: 90)));
       return GroceryList.fromJson(res.data);
-    } on DioException catch (e) {
-      _handleError(e);
-    }
-  }
-
-  @override
-  Future<RecipeSuggestions> suggestRecipes(FridgeInventory inventory, List<FamilyMember> family) async {
-    try {
-      final res = await _dio.post('/api/recipes/suggest',
-          data: {
-            'inventory': inventory.toJson(),
-            'family': family.map((m) => m.toJson()).toList(),
-          },
-          options: Options(receiveTimeout: const Duration(seconds: 90)));
-      return RecipeSuggestions.fromJson(res.data);
     } on DioException catch (e) {
       _handleError(e);
     }

@@ -5,11 +5,16 @@ class InventoryItem {
 
   InventoryItem({required this.name, this.quantity, this.useSoon = false});
 
-  factory InventoryItem.fromJson(Map<String, dynamic> j) => InventoryItem(
-        name: j['name'],
-        quantity: j['quantity'],
-        useSoon: j['use_soon'] ?? false,
-      );
+  // Accepts a plain string ("paneer") or an object {name, quantity, use_soon}
+  factory InventoryItem.fromJson(dynamic j) {
+    if (j is String) return InventoryItem(name: j);
+    final m = Map<String, dynamic>.from(j as Map);
+    return InventoryItem(
+      name: (m['name'] ?? '').toString(),
+      quantity: m['quantity']?.toString(),
+      useSoon: m['use_soon'] == true,
+    );
+  }
 
   Map<String, dynamic> toJson() => {'name': name, 'quantity': quantity, 'use_soon': useSoon};
 }
@@ -18,9 +23,19 @@ class FridgeInventory {
   final List<InventoryItem> items;
   FridgeInventory({required this.items});
 
-  factory FridgeInventory.fromJson(Map<String, dynamic> j) => FridgeInventory(
-        items: (j['items'] as List).map((e) => InventoryItem.fromJson(e)).toList(),
-      );
+  /// Reads {items: [...]} or {detected_items: ["paneer", ...]}
+  factory FridgeInventory.fromJson(Map<String, dynamic> j) {
+    final raw = (j['items'] ?? j['detected_items'] ?? const []) as List;
+    return FridgeInventory(items: raw.map(InventoryItem.fromJson).toList());
+  }
 
   Map<String, dynamic> toJson() => {'items': items.map((i) => i.toJson()).toList()};
+
+  /// What we send to the server: both shapes, so it works with either contract.
+  /// TODO: keep only the shape the backend confirms. Note that `detected_items`
+  /// has no "use soon" flag, so that feature only works if `items` is supported.
+  Map<String, dynamic> toRequestJson() => {
+        'items': items.map((i) => i.toJson()).toList(),
+        'detected_items': items.map((i) => i.name).toList(),
+      };
 }
