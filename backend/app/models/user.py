@@ -33,7 +33,7 @@ class FamilyMemberModel(Base):
 
     # Store lists like ["milk", "peanut"] directly as JSON columns
     allergies = Column(JSON, default=list)
-    health_conditions = Column(JSON, default=list)
+    anyother_specific_allergy = Column(JSON, default=list)
     food_preferences = Column(JSON, default=list)
     cuisine_preferences = Column(JSON, default=list)
 

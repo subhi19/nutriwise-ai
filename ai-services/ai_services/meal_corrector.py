@@ -8,11 +8,11 @@ meal_analyzer.py, so a corrected item is calculated exactly the same way
 as a normal one.
 """
 
-from nutrition_repo import search_food
-from calculator import calculate_nutrients, add_totals
-from schemas import MealAnalysis, MealItem, NutrientTotals, ItemCorrection
-from meal_analyzer import estimate_nutrients_with_gemini, _find_missing_nutrients, _get_suggestions
-from errors import invalid_input
+from .nutrition_repo import search_food
+from .calculator import calculate_nutrients, add_totals
+from .schemas import MealAnalysis, MealItem, NutrientTotals, ItemCorrection
+from .meal_analyzer import estimate_nutrients_with_gemini, _find_missing_nutrients, _get_suggestions
+from .errors import invalid_input
 
 
 def _resolve_item(name: str, weight_g: float | None) -> MealItem:

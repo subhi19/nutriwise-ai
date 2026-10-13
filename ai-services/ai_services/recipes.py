@@ -20,13 +20,13 @@ This is different from generate_meal_plan() in two ways:
 import json
 from google.genai import types
 
-from gemini_client import client, MODEL_NAME
-from retry_utils import call_with_retry
-from nutrition_repo import search_food
-from calculator import calculate_nutrients, add_totals
+from .gemini_client import client, MODEL_NAME
+from .retry_utils import call_with_retry
+from .nutrition_repo import search_food
+from .calculator import calculate_nutrients, add_totals
 # same fallback used everywhere else
-from meal_analyzer import estimate_nutrients_with_gemini
-from schemas import (
+from .meal_analyzer import estimate_nutrients_with_gemini
+from .schemas import (
     FridgeInventory, RecipeSuggestions, Recipe, FamilyMember,
     MealIngredient, NutrientTotals,
 )
