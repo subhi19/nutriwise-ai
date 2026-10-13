@@ -8,7 +8,7 @@ meal_analyzer.py, so a corrected item is calculated exactly the same way
 as a normal one.
 """
 
-from nutrition_repo import search_food
+from nutrition_repo import search_food, is_weak_match
 from calculator import calculate_nutrients, add_totals
 from schemas import MealAnalysis, MealItem, NutrientTotals, ItemCorrection
 from meal_analyzer import estimate_nutrients_with_gemini, _find_missing_nutrients, _get_suggestions
@@ -36,8 +36,10 @@ def _resolve_item(name: str, weight_g: float | None) -> MealItem:
             food_id=food["id"],
             weight_g=weight_g,
             nutrients=NutrientTotals(**nutrients),
-            confidence="high",  # the user confirmed this name themselves
-            needs_review=False,
+            # The user typed this name, so it's trusted, unless it only matched
+            # loosely by meaning — then keep it flagged so they can double-check.
+            confidence="medium" if is_weak_match(food) else "high",
+            needs_review=is_weak_match(food),
             user_corrected=True,
         )
     else:
@@ -69,15 +71,15 @@ def correct_meal(
     items = list(previous.items)
 
     for correction in corrections:
-        # Basic input checks, reported with the standard INVALID_INPUT error
+          # Basic input checks, reported with the standard INVALID_INPUT error
         if not correction.name or not correction.name.strip():
             raise invalid_input("Please type a dish name.")
         if correction.item_index is not None and not (0 <= correction.item_index < len(items)):
             raise invalid_input("That dish no longer exists in this meal. Please refresh and try again.")
 
-        # Keep the old weight if the user didn't give a new one.
-        # For a brand new dish with no weight, stay None so _resolve_item
-        # can use that food's typical serving from the database.
+          # Keep the old weight if the user didn't give a new one.
+          # For a brand new dish with no weight, stay None so _resolve_item
+          # can use that food's typical serving from the database.
         if correction.weight_g is not None:
             weight_g = correction.weight_g
         elif correction.item_index is not None:

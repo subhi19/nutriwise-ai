@@ -16,7 +16,7 @@ What it does, step by step:
 import json
 from google.genai import types
 
-from nutrition_repo import search_food
+from nutrition_repo import search_food, is_weak_match
 from calculator import calculate_nutrients, add_totals
 from schemas import MealAnalysis, MealItem, NutrientTotals
 from retry_utils import call_with_retry
@@ -172,7 +172,7 @@ def _build_items(detected_items: list[dict]) -> tuple[list[MealItem], list[str]]
                 weight_g=weight_g,
                 nutrients=NutrientTotals(**nutrients),
                 confidence=confidence,
-                needs_review=(confidence == "low"),
+                needs_review=(confidence == "low" or is_weak_match(food)),
                 user_corrected=False,
             ))
 

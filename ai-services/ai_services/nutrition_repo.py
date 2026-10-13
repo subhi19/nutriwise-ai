@@ -52,10 +52,34 @@ def _normalize(text: str) -> set[str]:
     return {w for w in words if w not in FILLER_WORDS}
 
 
+# Only the columns the app actually uses. Do NOT use select("*") here:
+# the foods table now also holds a large embedding column, and downloading
+# it for every food on every startup is slow and pointless.
+FOOD_COLUMNS = (
+    "id, name, aliases, category, typical_serving_g, calories, protein_g, "
+    "carbs_g, fat_g, fiber_g, iron_mg, calcium_mg, vitamin_a_mcg, vitamin_c_mg"
+)
+
+# Vector (meaning-based) matches at or above STRONG_MATCH are trusted like a
+# normal match. Matches between the minimum and this are accepted but should
+# be flagged "needs review", because testing showed embeddings sometimes
+# match a compound dish to just one of its ingredients. Tune with more samples.
+VECTOR_MIN_SIMILARITY = 0.7
+STRONG_MATCH = 0.85
+
+
+def is_weak_match(food: dict | None) -> bool:
+    """True if this food came from a medium-confidence vector match.
+    Normal word-matches have no similarity score, so they're never weak."""
+    if not food:
+        return False
+    similarity = food.get("similarity")
+    return similarity is not None and similarity < STRONG_MATCH
+
 # --- Load the whole table once, so we don't hit the database every search --
 
 def _load_all_foods() -> list[dict]:
-    result = client.table("foods").select("*").execute()
+    result = client.table("foods").select(FOOD_COLUMNS).execute()
     return result.data
 
 
@@ -133,14 +157,14 @@ def vector_search_food(name: str):
         "match_count": 1,
     }).execute()
 
-    if result.data and result.data[0]["similarity"] > 0.7:  # only trust a strong match
+    if result.data and result.data[0]["similarity"] >= VECTOR_MIN_SIMILARITY:  # below this, say "not found"
         return result.data[0]
     return None
 
 
 def get_food_by_id(food_id: int):
     """Look up a food by its numeric id. Used when re-displaying a saved item."""
-    result = client.table("foods").select("*").eq("id", food_id).execute()
+    result = client.table("foods").select(FOOD_COLUMNS).eq("id", food_id).execute()
     if result.data:
         return result.data[0]
     return None
