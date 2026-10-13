@@ -1,0 +1,157 @@
+"""
+test_meal_flow.py
+
+Tests the REAL meal flow with no fake data:
+
+    real photo -> analyze_meal() -> you see the numbered items
+               -> you type corrections (fix a dish / add a missed dish)
+               -> correct_meal() gets the REAL result from analyze_meal
+               -> you see the updated meal
+
+This is exactly what the app does: the screen shows the result, the user
+edits a dish, and the app sends the previous result back with the
+corrections.
+
+Run:   python test_meal_flow.py
+"""
+
+import os
+import sys
+import mimetypes
+
+# Works whether this file sits in ai_services/ or in a sibling tests/ folder
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _here)
+sys.path.insert(0, os.path.join(_here, "..", "ai_services"))
+
+from meal_analyzer import analyze_meal
+from meal_corrector import correct_meal
+from schemas import ItemCorrection
+from errors import AIServiceError
+
+
+def find_image(name: str) -> str | None:
+    """Looks for the photo as typed, then inside images/ folders."""
+    candidates = [
+        name,
+        os.path.join("images", name),
+        os.path.join(_here, name),
+        os.path.join(_here, "images", name),
+        os.path.join(_here, "..", "ai_services", "images", name),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def show(result, title: str):
+    print(f"\n{'=' * 60}\n{title}\n{'=' * 60}")
+    for i, item in enumerate(result.items, 1):
+        source = "database" if item.food_id else "AI estimate"
+        flag = "  [NEEDS REVIEW]" if item.needs_review else ""
+        print(f"  {i}. {item.name} ({item.weight_g:g} g): "
+              f"{item.nutrients.calories:g} kcal  [{source}]{flag}")
+    t = result.total
+    print(f"\n  TOTAL: {t.calories:g} kcal | protein {t.protein_g:g} g | "
+          f"carbs {t.carbs_g:g} g | fat {t.fat_g:g} g")
+    print(f"  Missing nutrients: {result.missing_nutrients or 'none'}")
+    for s in result.suggestions:
+        print(f"  Suggestion: {s}")
+    if result.unmatched_items:
+        print(f"  Not in database (AI-estimated): {result.unmatched_items}")
+
+
+def ask_weight(prompt: str):
+    raw = input(prompt).strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        print("    (not a number, ignoring weight)")
+        return None
+
+
+def collect_corrections(current) -> list[ItemCorrection]:
+    """Lets you queue several corrections, then returns them all."""
+    corrections = []
+    print("\nWhat do you want to change?")
+    print("  - type an item NUMBER to fix that dish")
+    print("  - type  a  to ADD a dish the photo missed")
+    print("  - press Enter when you're done")
+
+    while True:
+        choice = input("\n> ").strip().lower()
+        if choice == "":
+            return corrections
+
+        if choice == "a":
+            name = input("  Name of the missed dish: ").strip()
+            weight = ask_weight("  Weight in grams (Enter = typical serving): ")
+            corrections.append(ItemCorrection(item_index=None, name=name, weight_g=weight))
+            print(f"  queued: ADD '{name}'")
+
+        elif choice.isdigit() and 1 <= int(choice) <= len(current.items):
+            idx = int(choice) - 1
+            old = current.items[idx].name
+            name = input(f"  Correct name for '{old}': ").strip()
+            weight = ask_weight(f"  New weight in grams (Enter = keep {current.items[idx].weight_g:g}): ")
+            corrections.append(ItemCorrection(item_index=idx, name=name, weight_g=weight))
+            print(f"  queued: FIX #{choice} '{old}' -> '{name}'")
+
+        else:
+            print(f"  Please type a number from 1 to {len(current.items)}, 'a', or press Enter.")
+
+
+def main():
+    name = input("Meal photo file name (e.g. meal2.jpg): ").strip().strip('"')
+    path = find_image(name)
+    if not path:
+        print(f"\nCould not find '{name}'. Looked in the current folder and in images/.")
+        print(f"You are running from: {os.getcwd()}")
+        raise SystemExit(1)
+
+    mime_type = mimetypes.guess_type(path)[0] or "image/jpeg"
+    with open(path, "rb") as f:
+        image_bytes = f.read()
+
+    # ---- STEP 1: real analysis ------------------------------------------
+    print("\nAnalyzing the photo...")
+    try:
+        current = analyze_meal(image_bytes, mime_type)
+    except (AIServiceError, RuntimeError) as e:
+        print(f"\nAnalysis failed: {e}")
+        raise SystemExit(1)
+
+    show(current, "STEP 1 — analyze_meal() result")
+
+    # ---- STEP 2+: corrections, using the REAL previous result ------------
+    round_number = 1
+    while True:
+        corrections = collect_corrections(current)
+        if not corrections:
+            print("\nNo corrections entered. Finished.")
+            break
+
+        before_kcal = current.total.calories
+        print(f"\nApplying {len(corrections)} correction(s) with correct_meal()...")
+        try:
+            current = correct_meal(current, corrections)
+        except (AIServiceError, RuntimeError) as e:
+            print(f"\nCorrection failed: {e}")
+            break
+
+        show(current, f"AFTER correction round {round_number}")
+        diff = current.total.calories - before_kcal
+        print(f"\n  Calories changed: {before_kcal:g} -> {current.total.calories:g} kcal ({diff:+g})")
+
+        round_number += 1
+        if input("\nAnother round of corrections? (y/n): ").strip().lower() != "y":
+            break
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()

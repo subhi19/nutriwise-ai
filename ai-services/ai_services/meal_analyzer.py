@@ -16,11 +16,11 @@ What it does, step by step:
 import json
 from google.genai import types
 
-from nutrition_repo import search_food, is_weak_match
-from calculator import calculate_nutrients, add_totals
-from schemas import MealAnalysis, MealItem, NutrientTotals
-from retry_utils import call_with_retry
-from gemini_client import client, MODEL_NAME  # the one shared Gemini connection
+from .nutrition_repo import search_food, is_weak_match
+from .calculator import calculate_nutrients, add_totals
+from .schemas import MealAnalysis, MealItem, NutrientTotals
+from .retry_utils import call_with_retry
+from .gemini_client import client, MODEL_NAME  # the one shared Gemini connection
 
 
 # --- Step 1: Ask Gemini what's on the plate ---------------------------------

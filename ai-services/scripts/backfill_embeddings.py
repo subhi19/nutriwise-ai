@@ -25,11 +25,11 @@ import sys
 import os
 # This script lives in scripts/, but gemini_client.py lives in the
 # sibling ai_services/ folder. This line tells Python to also look there.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ai_services"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import time
 from supabase import create_client
-from gemini_client import client
+from ai_services.gemini_client import client
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")

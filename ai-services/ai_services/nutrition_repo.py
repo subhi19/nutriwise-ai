@@ -144,7 +144,7 @@ def vector_search_food(name: str):
     curry" to "Chicken curry" even though they share no words — because
     the embeddings understand they mean roughly the same thing.
     """
-    from gemini_client import client as gemini_client
+    from .gemini_client import client as gemini_client
 
     response = gemini_client.models.embed_content(
         model="gemini-embedding-001",

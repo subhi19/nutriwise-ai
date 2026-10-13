@@ -11,9 +11,9 @@ import sys
 import os
 # This script lives in scripts/, but gemini_client.py lives in the sibling
 # ai_services/ folder. This line tells Python to also look there.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ai_services"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from gemini_client import client
+from ai_services.gemini_client import client
 
 response = client.models.embed_content(
     model="gemini-embedding-001",

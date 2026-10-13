@@ -28,12 +28,12 @@ only to that day, on top of the general preferences.
 import json
 from google.genai import types
 
-from gemini_client import client, MODEL_NAME
-from retry_utils import call_with_retry
-from nutrition_repo import search_food
-from calculator import calculate_nutrients, add_totals
-from meal_analyzer import estimate_nutrients_with_gemini  # reused fallback, same as meal_analyzer.py
-from schemas import (
+from .gemini_client import client, MODEL_NAME
+from .retry_utils import call_with_retry
+from .nutrition_repo import search_food
+from .calculator import calculate_nutrients, add_totals
+from .meal_analyzer import estimate_nutrients_with_gemini  # reused fallback, same as meal_analyzer.py
+from .schemas import (
     FamilyMember, FridgeInventory, WeeklyPlan, DayPlan, PlannedMeal,
     MealIngredient, NutrientTotals, DayPreference,
 )
@@ -340,7 +340,7 @@ def generate_meal_plan(
 # python meal_plan.py
 
 if __name__ == "__main__":
-    from schemas import InventoryItem
+    from .schemas import InventoryItem
 
     fake_family = [
         FamilyMember(

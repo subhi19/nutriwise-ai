@@ -1,0 +1,59 @@
+"""
+test_vector_search.py
+
+Tests ONLY the semantic (vector) search layer, so you can see whether
+embeddings are really being used. Each query below is worded differently
+from the names in your foods table, so word-matching alone would struggle.
+
+Run:   python test_vector_search.py
+
+Needs SUPABASE_URL, SUPABASE_KEY and GEMINI_API_KEY set, same as the
+other scripts. Uses the normal (read-only) key; nothing is written.
+"""
+
+import os
+import sys
+
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _here)
+sys.path.insert(0, os.path.join(_here, "..", "ai_services"))
+
+from nutrition_repo import vector_search_food
+
+# Different wording from what's in the table, on purpose
+QUERIES = [
+    "murgh makhani",                    # another name for butter chicken
+    "chapati",                          # flatbread
+    "lentil soup",                      # dal-like
+    "spinach with cottage cheese",      # palak paneer, described in words
+    "stir fried noodles",               # chow mein-like
+    "pasta with tomato sauce",          # Italian items
+    "grilled chicken",                  # should match something sensible
+    "purple unicorn pudding",           # nonsense: should find NOTHING
+]
+
+
+def main():
+    print("Testing vector search (meaning-based lookup)\n")
+    found = 0
+    for q in QUERIES:
+        try:
+            food = vector_search_food(q)
+        except Exception as e:
+            print(f"  '{q}'  ->  ERROR: {e}")
+            print("\nAn error here usually means the SQL function (match_foods) isn't")
+            print("created, or the vector size in the SQL doesn't match the embeddings.")
+            return
+
+        if food:
+            found += 1
+            print(f"  '{q}'  ->  {food['name']}   (similarity {food['similarity']:.2f})")
+        else:
+            print(f"  '{q}'  ->  no confident match")
+
+    print(f"\n{found} of {len(QUERIES)} queries found a match.")
+    print("Good sign: sensible matches for the real foods, and NO match for the nonsense one.")
+
+
+if __name__ == "__main__":
+    main()

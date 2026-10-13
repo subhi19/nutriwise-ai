@@ -20,12 +20,12 @@ This is different from generate_meal_plan() in two ways:
 import json
 from google.genai import types
 
-from gemini_client import client, MODEL_NAME
-from retry_utils import call_with_retry
-from nutrition_repo import search_food
-from calculator import calculate_nutrients, add_totals
-from meal_analyzer import estimate_nutrients_with_gemini  # same fallback used everywhere else
-from schemas import (
+from .gemini_client import client, MODEL_NAME
+from .retry_utils import call_with_retry
+from .nutrition_repo import search_food
+from .calculator import calculate_nutrients, add_totals
+from .meal_analyzer import estimate_nutrients_with_gemini  # same fallback used everywhere else
+from .schemas import (
     FridgeInventory, RecipeSuggestions, Recipe, FamilyMember,
     MealIngredient, NutrientTotals,
 )
@@ -141,7 +141,7 @@ Return JSON only, no extra text, in this format:
 # python recipes.py
 
 if __name__ == "__main__":
-    from schemas import InventoryItem
+    from .schemas import InventoryItem
 
     fake_inventory = FridgeInventory(items=[
         InventoryItem(name="Tomatoes", quantity="4", use_soon=False),

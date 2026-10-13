@@ -20,13 +20,12 @@ import mimetypes
 
 # Works whether this file sits in ai_services/ or in a sibling tests/ folder
 _here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _here)
-sys.path.insert(0, os.path.join(_here, "..", "ai_services"))
+sys.path.insert(0, os.path.join(_here, ".."))
 
-from fridge_analyzer import analyze_fridge
-from meal_plan import generate_meal_plan
-from schemas import FamilyMember, FridgeInventory, InventoryItem
-from errors import AIServiceError
+from ai_services.fridge_analyzer import analyze_fridge
+from ai_services.meal_plan import generate_meal_plan
+from ai_services.schemas import FamilyMember, FridgeInventory, InventoryItem
+from ai_services.errors import AIServiceError
 
 # Pretend household (until the backend loads real profiles from the database)
 HOUSEHOLD = [

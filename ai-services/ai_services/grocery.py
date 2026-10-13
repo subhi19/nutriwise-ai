@@ -29,11 +29,11 @@ import json
 from collections import Counter
 from google.genai import types
 
-from nutrition_repo import search_food
-from meal_plan import get_full_week_ingredients
-from gemini_client import client, MODEL_NAME
-from retry_utils import call_with_retry
-from schemas import FamilyMember, WeeklyPlan, FridgeInventory, GroceryItem, GroceryList
+from .nutrition_repo import search_food
+from .meal_plan import get_full_week_ingredients
+from .gemini_client import client, MODEL_NAME
+from .retry_utils import call_with_retry
+from .schemas import FamilyMember, WeeklyPlan, FridgeInventory, GroceryItem, GroceryList
 
 # Keep this in sync with the "category" values actually used in your
 # nutrition CSV / Supabase table, so Gemini's guesses stay consistent
@@ -184,8 +184,8 @@ def generate_grocery_list(
 # python grocery.py
 
 if __name__ == "__main__":
-    from meal_plan import generate_meal_plan
-    from schemas import InventoryItem
+    from .meal_plan import generate_meal_plan
+    from .schemas import InventoryItem
 
     fake_family = [
         FamilyMember(

@@ -13,9 +13,9 @@ That list gets used later by suggest_recipes() and generate_meal_plan().
 import json
 from google.genai import types
 
-from meal_analyzer import client, MODEL_NAME  # reuse the same Gemini connection
-from retry_utils import call_with_retry
-from schemas import FridgeInventory, InventoryItem
+from .meal_analyzer import client, MODEL_NAME  # reuse the same Gemini connection
+from .retry_utils import call_with_retry
+from .schemas import FridgeInventory, InventoryItem
 
 
 FRIDGE_PROMPT = """You are a kitchen assistant. Look at this fridge or
