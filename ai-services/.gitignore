@@ -3,3 +3,5 @@ images/
 
 # Ignore data
 data/
+
+*.bak
