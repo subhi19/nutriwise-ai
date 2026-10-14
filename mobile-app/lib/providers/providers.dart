@@ -8,7 +8,7 @@ import '../services/api_service.dart';
 
 // Mock by default, so nobody ships mock data by accident.
 // Go live with:  --dart-define=USE_MOCK=false
-const useMock = bool.fromEnvironment('USE_MOCK', defaultValue: true);
+const useMock = bool.fromEnvironment('USE_MOCK', defaultValue: false);
 
 final apiProvider = Provider<NutriApi>((ref) => useMock
     ? MockApi()

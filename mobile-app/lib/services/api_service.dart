@@ -16,7 +16,7 @@ import '../models/recipe.dart';
 const kApiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
 
 // Flip to true once AI/backend confirm they accept `day_preferences`.
-const kSendDayPreferences = false;
+const kSendDayPreferences = true;
 
 // ---------- Error handling ----------
 
@@ -368,7 +368,7 @@ class MockApi implements NutriApi {
 /// /api/meal/correct: our AI contract says `corrections` is a list of
 /// {item_index, name, weight_g}. The backend's example showed a plain sentence.
 /// Check MealCorrectionPayload in Swagger (/docs). If it says "string", set this to true.
-const kCorrectionsAsText = false;
+const kCorrectionsAsText = true;
 
 String _correctionsToText(MealAnalysis prev, List<ItemCorrection> cs) {
   return cs.map((c) {
