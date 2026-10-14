@@ -32,7 +32,26 @@ import secrets
 from ai_services.errors import AIServiceError, STATUS_BY_CODE
 import sys
 from pathlib import Path
+import json
+from typing import Any
 
+
+def as_list(value: Any) -> list:
+  """Convert DB value (list, JSON string, or comma-separated string) into a clean Python list."""
+  if value is None:
+    return []
+  if isinstance(value, list):
+    return value
+  if isinstance(value, str):
+    text = value.strip()
+    if not text:
+      return []
+    try:
+      parsed = json.loads(text)
+      return as_list(parsed)
+    except (ValueError, json.JSONDecodeError):
+      return [p.strip() for p in text.split(',') if p.strip()]
+  return []
 
 # Add ai_services directory to sys.path BEFORE any other project imports
 _AI_DIR = str(Path(__file__).resolve().parent.parent.parent /
@@ -312,21 +331,21 @@ def create_family_member(member: FamilyMember, user_id: int, db: Session = Depen
         allergies=member.allergies,
         anyother_specific_allergy=member.anyother_specific_allergy,
         food_preferences=member.food_preferences,
-        cuisine_preferences=member.cuisine_preferences,
+        cuisine_preferences=db_member.cuisine_preferences or [],
     )
     db.add(db_member)
     db.commit()
     db.refresh(db_member)
 
     return FamilyMember(
-        id=str(db_member.id),
+        id=db_member.id,
         name=db_member.name,
         age=db_member.age,
         gender=db_member.gender,
-        allergies=db_member.allergies or [],
-        anyother_specific_allergy=db_member.anyother_specific_allergy or [],
-        food_preferences=db_member.food_preferences or [],
-        cuisine_preferences=db_member.cuisine_preferences or [],
+        allergies=as_list(db_member.allergies),
+        anyother_specific_allergy=as_list(db_member.anyother_specific_allergy),
+        food_preferences=as_list(db_member.food_preferences),
+        cuisine_preferences=as_list(db_member.cuisine_preferences),
     )
 
 
@@ -359,23 +378,23 @@ def update_family_member(member_id: int, payload: FamilyMember, db: Session = De
     db_member.name = payload.name
     db_member.age = payload.age
     db_member.gender = payload.gender
-    db_member.allergies = payload.allergies
-    db_member.anyother_specific_allergy = payload.anyother_specific_allergy
-    db_member.food_preferences = payload.food_preferences
-    db_member.cuisine_preferences = payload.cuisine_preferences
+    db_member.allergies = as_list(payload.allergies)
+    db_member.anyother_specific_allergy = as_list(payload.anyother_specific_allergy)
+    db_member.food_preferences = as_list(payload.food_preferences)
+    db_member.cuisine_preferences = as_list(payload.cuisine_preferences)
 
     db.commit()
     db.refresh(db_member)
 
     return FamilyMember(
-        id=str(db_member.id),
+        id=db_member.id,
         name=db_member.name,
         age=db_member.age,
         gender=db_member.gender,
-        allergies=db_member.allergies or [],
-        anyother_specific_allergy=db_member.anyother_specific_allergy or [],
-        food_preferences=db_member.food_preferences or [],
-        cuisine_preferences=db_member.cuisine_preferences or [],
+        allergies=as_list(db_member.allergies),
+        anyother_specific_allergy=as_list(db_member.anyother_specific_allergy),
+        food_preferences=as_list(db_member.food_preferences),
+        cuisine_preferences=as_list(db_member.cuisine_preferences),
     )
 
 
