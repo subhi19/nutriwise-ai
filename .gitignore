@@ -19,3 +19,26 @@ venv/
  
 # Logs
 *.log
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python cache & build files
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+*.env
+
+# Local Databases
+*.db
+*.sqlite3
+
+# OS Specific
+.DS_Store
