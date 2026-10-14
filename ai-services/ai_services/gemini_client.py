@@ -4,19 +4,6 @@ gemini_client.py
 The ONLY file that creates a connection to Gemini. Every other file
 (meal_analyzer.py, fridge_analyzer.py, recipes.py, etc.) imports the
 `client` and `MODEL_NAME` from here instead of connecting on its own.
-
-Why this matters: when your team gets Google Cloud access and wants to
-switch from the free API key to Vertex AI, you only change this ONE
-file (and your .env settings) — nothing else in the project needs to
-change.
-
-Right now (USE_VERTEX=false or unset): uses your GEMINI_API_KEY, same
-as your original working script.
-
-Later (USE_VERTEX=true): uses Vertex AI with your Google Cloud project
-instead. Requires `gcloud auth application-default login` to be set up
-once on that machine — ask a teammate with Cloud access for help with
-that step when you get there.
 """
 
 import os
@@ -25,24 +12,37 @@ from dotenv import load_dotenv
 from google import genai
 
 # 1. Load backend/.env automatically
-_backend_env = Path(__file__).resolve(
-).parent.parent.parent / "backend" / ".env"
+_backend_env = Path(__file__).resolve().parent.parent.parent / "backend" / ".env"
 load_dotenv(dotenv_path=_backend_env)
 load_dotenv()
 
-# 2. Export MODEL_NAME and other configurations expected by ai_services
-MODEL_NAME = os.environ.get("MODEL_NAME", "gemini-2.5-flash")
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
+# 2. Export MODEL_NAME and EMBEDDING_MODEL
+_raw_model = os.environ.get("MODEL_NAME", "gemini-2.5-flash")
+# Guard against invalid 'gemini-3.5-flash' setting in .env
+MODEL_NAME = "gemini-2.5-flash" if _raw_model == "gemini-3.5-flash" else _raw_model
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-004")
 
 
-def _build_client():
-    api_key = os.environ.get(
-        "GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+def _build_client() -> genai.Client:
+    use_vertex = os.environ.get("USE_VERTEX", "false").lower() in ("true", "1", "yes")
+
+    if use_vertex:
+        # Remove API keys from env so google-genai uses ADC / IAM strictly
+        os.environ.pop("GOOGLE_API_KEY", None)
+        os.environ.pop("GEMINI_API_KEY", None)
+
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "nutriwise-ai-511608")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+        print(f"[GeminiClient] Initializing Vertex AI client (project={project}, location={location}, model={MODEL_NAME})")
+        return genai.Client(vertexai=True, project=project, location=location)
+
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError(
-            "GEMINI_API_KEY or GOOGLE_API_KEY is missing from environment. "
-            "Please check backend/.env"
+            "GEMINI_API_KEY is missing and USE_VERTEX is not enabled. "
+            "Set USE_VERTEX=true for Google Cloud Vertex AI or provide GEMINI_API_KEY."
         )
+    print(f"[GeminiClient] Initializing Gemini Developer API client (model={MODEL_NAME})")
     return genai.Client(api_key=api_key)
 
 
