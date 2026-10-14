@@ -1,0 +1,5 @@
+# Ignore images
+images/
+
+# Ignore data
+data/
