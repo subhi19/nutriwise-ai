@@ -328,10 +328,10 @@ def create_family_member(member: FamilyMember, user_id: int, db: Session = Depen
         name=member.name,
         age=member.age,
         gender=member.gender,
-        allergies=member.allergies,
-        anyother_specific_allergy=member.anyother_specific_allergy,
-        food_preferences=member.food_preferences,
-        cuisine_preferences=db_member.cuisine_preferences or [],
+        allergies=as_list(member.allergies),
+        anyother_specific_allergy=as_list(member.anyother_specific_allergy),
+        food_preferences=as_list(member.food_preferences),
+        cuisine_preferences=as_list(member.cuisine_preferences),
     )
     db.add(db_member)
     db.commit()
@@ -348,23 +348,25 @@ def create_family_member(member: FamilyMember, user_id: int, db: Session = Depen
         cuisine_preferences=as_list(db_member.cuisine_preferences),
     )
 
-
 @app.get("/api/family/members", response_model=list[FamilyMember])
 def list_family_members(user_id: int, db: Session = Depends(get_db)):
-    members = db.query(FamilyMemberModel).filter(
-        FamilyMemberModel.user_id == user_id).all()
-    return [
-        FamilyMember(
-            id=str(m.id),
-            name=m.name,
-            age=m.age,
-            gender=m.gender,
-            allergies=m.allergies or [],
-            anyother_specific_allergy=m.anyother_specific_allergy or [],
-            food_preferences=m.food_preferences or [],
-            cuisine_preferences=m.cuisine_preferences or [],
-        )
-        for m in members
+  members = (
+      db.query(FamilyMemberModel)
+      .filter(FamilyMemberModel.user_id == user_id)
+      .all()
+  )
+  return [
+      FamilyMember(
+          id=m.id,
+          name=m.name,
+          age=m.age,
+          gender=m.gender,
+          allergies=as_list(m.allergies),
+          anyother_specific_allergy=as_list(m.anyother_specific_allergy),
+          food_preferences=as_list(m.food_preferences),
+          cuisine_preferences=as_list(m.cuisine_preferences),
+      )
+      for m in members
     ]
 
 
