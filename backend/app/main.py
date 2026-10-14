@@ -338,7 +338,7 @@ def create_family_member(member: FamilyMember, user_id: int, db: Session = Depen
     db.refresh(db_member)
 
     return FamilyMember(
-        id=db_member.id,
+        id=str(db_member.id),
         name=db_member.name,
         age=db_member.age,
         gender=db_member.gender,
@@ -347,6 +347,8 @@ def create_family_member(member: FamilyMember, user_id: int, db: Session = Depen
         food_preferences=as_list(db_member.food_preferences),
         cuisine_preferences=as_list(db_member.cuisine_preferences),
     )
+
+
 
 @app.get("/api/family/members", response_model=list[FamilyMember])
 def list_family_members(user_id: int, db: Session = Depends(get_db)):
@@ -357,7 +359,7 @@ def list_family_members(user_id: int, db: Session = Depends(get_db)):
   )
   return [
       FamilyMember(
-          id=m.id,
+          id=str(m.id),
           name=m.name,
           age=m.age,
           gender=m.gender,
@@ -389,7 +391,7 @@ def update_family_member(member_id: int, payload: FamilyMember, db: Session = De
     db.refresh(db_member)
 
     return FamilyMember(
-        id=db_member.id,
+        id=str(db_member.id),
         name=db_member.name,
         age=db_member.age,
         gender=db_member.gender,

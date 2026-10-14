@@ -6,12 +6,11 @@ the backend, the AI functions, and (via the backend's API) the Flutter app.
 
 Do not rename or remove a field here without telling the team first.
 """
-
-from typing import Literal, Optional
-from pydantic import BaseModel
+import json
+from typing import Any, Literal, Optional
+from pydantic import BaseModel, field_validator
 
 Confidence = Literal["low", "medium", "high"]
-
 
 # ---------------------------------------------------------------------------
 # Family profile
@@ -28,6 +27,39 @@ class FamilyMember(BaseModel):
     food_preferences: list[str] = []     # e.g. "vegetarian"
     # e.g. "Indian", "Italian", "Chinese"; empty = any cuisine
     cuisine_preferences: list[str] = []
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_str(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
+
+    @field_validator(
+        "allergies",
+        "anyother_specific_allergy",
+        "food_preferences",
+        "cuisine_preferences",
+        mode="before",
+    )
+    @classmethod
+    def coerce_to_list(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            text = v.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if str(x).strip()]
+            except (ValueError, json.JSONDecodeError):
+                pass
+            return [p.strip() for p in text.split(",") if p.strip()]
+        return []
 
 
 class DayPreference(BaseModel):
