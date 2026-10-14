@@ -464,7 +464,7 @@ class _StepCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Text(title, style: Theme.of(context).textTheme.titleSmall)),
-                if (trailing != null) trailing!,
+                ?trailing,
               ],
             ),
             const SizedBox(height: 12),
