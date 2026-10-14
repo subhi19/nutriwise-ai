@@ -4,7 +4,6 @@ import '../core/constants.dart';
 import '../core/theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_logo.dart';
-import '../widgets/food_doodles.dart';
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -13,10 +12,7 @@ class SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: AppBackground(
-        child: Stack(
-          children: [
-            const FoodDoodles(),
-            SafeArea(
+        child: SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
                 child: Column(
@@ -35,7 +31,7 @@ class SplashScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(AppIdentity.subTagline,
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: AppColors.secondary, fontStyle: FontStyle.italic,
+                              color: AppColors.primaryDark, fontStyle: FontStyle.italic,
                             )),
                     const SizedBox(height: 26),
                     Container(
@@ -90,7 +86,7 @@ class SplashScreen extends StatelessWidget {
                           color: Colors.transparent,
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16),
-                            onTap: () => context.go('/profile'),
+                            onTap: () => context.go('/login'),
                             child: const Center(
                               child: Text('Explore Now!',
                                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -103,9 +99,7 @@ class SplashScreen extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
+            ), 
       ),
     );
   }

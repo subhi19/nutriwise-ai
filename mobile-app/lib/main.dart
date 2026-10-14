@@ -7,11 +7,13 @@ void main() {
   runApp(const ProviderScope(child: NutriWiseApp()));
 }
 
-class NutriWiseApp extends StatelessWidget {
+class NutriWiseApp extends ConsumerWidget {
   const NutriWiseApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+
     return MaterialApp.router(
       routerConfig: router,
       theme: appTheme,
@@ -20,8 +22,7 @@ class NutriWiseApp extends StatelessWidget {
         final mq = MediaQuery.of(context);
         return MediaQuery(
           data: mq.copyWith(
-            // Respects the phone's own accessibility font-size setting,
-            // capped at 1.3x so layouts don't break
+            // Respects the phone's own font-size setting, capped at 1.3x so layouts don't break
             textScaler: TextScaler.linear(mq.textScaler.scale(1.0).clamp(1.0, 1.3)),
           ),
           child: child!,
