@@ -18,11 +18,16 @@ import '../widgets/app_brand_bar.dart';
 import '../widgets/error_box.dart';
 import '../widgets/photo_picker.dart';
 
-String _nameKey(String name) => name.trim().toLowerCase();
+/// "Prawn (cooked)" -> "prawn". Used to tell a real rename from a qualifier like "(raw)".
+String _baseName(String s) => s
+    .toLowerCase()
+    .replaceAll(RegExp(r'\(.*?\)'), ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
 
 /// Red = the AI wasn't sure AND the user hasn't confirmed or corrected it yet.
-bool _isFlagged(MealItem i, Set<String> reviewed) =>
-    i.needsReview && !i.userCorrected && !reviewed.contains(_nameKey(i.name));
+bool _isFlagged(MealItem item, int index, Set<int> reviewed) =>
+    item.needsReview && !item.userCorrected && !reviewed.contains(index);
 
 /// One editable row in the Correct Meal dialog.
 class _CorrectionRow {
@@ -58,8 +63,14 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
   bool _saving = false;
   final GlobalKey _cardKey = GlobalKey();
 
-  /// Lower-cased names of items the user has confirmed or corrected.
-  final Set<String> _reviewed = {};
+  /// Positions of items the user has confirmed or corrected.
+  /// Edited items keep their position and new items are appended, so positions stay stable.
+  final Set<int> _reviewed = {};
+
+  /// What the user typed for each position. The server may answer with the database's own
+  /// name for the food (typed "Prawn (cooked)" comes back as "Shrimp (cooked)"), so we keep
+  /// the typed name for display.
+  final Map<int, String> _labels = {};
 
   @override
   void dispose() {
@@ -74,6 +85,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
       _imageBytes = bytes;
       _result = null; // clear any previous result on a new photo
       _reviewed.clear();
+      _labels.clear();
     });
   }
 
@@ -87,6 +99,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
     setState(() {
       _result = const AsyncLoading();
       _reviewed.clear();
+      _labels.clear();
     });
     try {
       final analysis = await ref.read(apiProvider).analyzeMeal(_imageBytes!, member);
@@ -99,14 +112,16 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
   }
 
   Future<void> _openCorrectMealDialog(MealAnalysis current, FamilyMember member) async {
-    // One pre-filled row per detected item, so users edit in place
+    final baseLen = current.items.length;
+
+    // One pre-filled row per detected item. Each shows the name the user last typed, if any.
     final rows = <_CorrectionRow>[
       for (final e in current.items.asMap().entries)
         _CorrectionRow(
           index: e.key,
           original: e.value,
-          flagged: _isFlagged(e.value, _reviewed),
-          nameCtrl: TextEditingController(text: e.value.name),
+          flagged: _isFlagged(e.value, e.key, _reviewed),
+          nameCtrl: TextEditingController(text: _labels[e.key] ?? e.value.name),
           weightCtrl: TextEditingController(text: e.value.weightG.round().toString()),
         ),
     ];
@@ -277,23 +292,35 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
 
     if (submitted != true) return;
 
-    // Only send what actually changed
+    // Work out what actually changed. Only that is sent to the server.
     final corrections = <ItemCorrection>[];
+    final labelUpdates = <int, String>{}; // position -> the name the user typed
+    final reviewedNow = <int>{}; // positions to mark as reviewed
+
     for (final r in rows) {
+      final idx = r.index!;
       final old = r.original!;
+      final shown = _labels[idx] ?? old.name; // what the dialog displayed for this row
       final newName = r.nameCtrl.text.trim();
       final newWeight = double.tryParse(r.weightCtrl.text.trim());
-      final nameChanged = newName.isNotEmpty && newName != old.name;
+      final nameChanged = newName.isNotEmpty && newName != shown;
       final weightChanged =
           newWeight != null && newWeight > 0 && newWeight != old.weightG.roundToDouble();
+
       if (nameChanged || weightChanged) {
         corrections.add(ItemCorrection(
-          itemIndex: r.index,
-          name: newName.isEmpty ? old.name : newName,
+          itemIndex: idx,
+          // Weight-only change: send the server's own name so it re-matches the same food.
+          name: nameChanged ? newName : old.name,
           weightG: weightChanged ? newWeight : null, // null = keep the old weight
         ));
+        if (nameChanged) labelUpdates[idx] = newName;
       }
+      if (r.confirmed || nameChanged || weightChanged) reviewedNow.add(idx);
     }
+
+    // New items are appended to the end of the list, in the order they were added.
+    var added = 0;
     for (final r in newRows) {
       final name = r.nameCtrl.text.trim();
       if (name.isEmpty) continue;
@@ -302,21 +329,14 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
         name: name,
         weightG: double.tryParse(r.weightCtrl.text.trim()),
       ));
-    }
-
-    // Everything the user ticked, edited or added counts as reviewed
-    final newlyReviewed = <String>{};
-    for (final r in rows) {
-      final edited = corrections.any((c) => c.itemIndex == r.index);
-      if (r.confirmed || edited) newlyReviewed.add(_nameKey(r.nameCtrl.text));
-    }
-    for (final r in newRows) {
-      if (r.nameCtrl.text.trim().isNotEmpty) newlyReviewed.add(_nameKey(r.nameCtrl.text));
+      labelUpdates[baseLen + added] = name;
+      reviewedNow.add(baseLen + added);
+      added++;
     }
 
     if (corrections.isEmpty) {
       // Nothing to recalculate: just clear the red marks on what was confirmed
-      if (newlyReviewed.isNotEmpty) setState(() => _reviewed.addAll(newlyReviewed));
+      if (reviewedNow.isNotEmpty) setState(() => _reviewed.addAll(reviewedNow));
       return;
     }
 
@@ -325,7 +345,12 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
       final updated = await ref.read(apiProvider).correctMeal(current, corrections, member);
       if (!mounted) return;
       setState(() {
-        _reviewed.addAll(newlyReviewed);
+        _reviewed.addAll(reviewedNow.where((i) => i < updated.items.length));
+        // Keep the typed names, but only trust positions of new items if the list grew as expected.
+        final listGrewAsExpected = updated.items.length == baseLen + added;
+        for (final e in labelUpdates.entries) {
+          if (e.key < baseLen || listGrewAsExpected) _labels[e.key] = e.value;
+        }
         _result = AsyncData(updated);
       });
     } catch (e) {
@@ -463,6 +488,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                             analysis: analysis,
                             imageBytes: _imageBytes,
                             reviewed: _reviewed,
+                            labels: _labels,
                             saving: _saving,
                             onCorrectMeal: () {
                               if (member != null) _openCorrectMealDialog(analysis, member);
@@ -583,7 +609,8 @@ class _ResultCard extends StatelessWidget {
   final GlobalKey cardKey;
   final MealAnalysis analysis;
   final Uint8List? imageBytes;
-  final Set<String> reviewed;
+  final Set<int> reviewed;
+  final Map<int, String> labels;
   final bool saving;
   final VoidCallback onCorrectMeal;
   final VoidCallback onLoveIt;
@@ -593,6 +620,7 @@ class _ResultCard extends StatelessWidget {
     required this.analysis,
     required this.imageBytes,
     required this.reviewed,
+    required this.labels,
     required this.saving,
     required this.onCorrectMeal,
     required this.onLoveIt,
@@ -605,7 +633,18 @@ class _ResultCard extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final presentNutrients =
         _nutrientLabels.where((k) => !analysis.missingNutrients.contains(k)).toList();
-    final flaggedCount = analysis.items.where((i) => _isFlagged(i, reviewed)).length;
+
+    var flaggedCount = 0;
+    final matchNotes = <String>[];
+    for (var i = 0; i < analysis.items.length; i++) {
+      final item = analysis.items[i];
+      if (_isFlagged(item, i, reviewed)) flaggedCount++;
+      // The user typed one name but the server matched a different food in its database
+      final typed = labels[i];
+      if (typed != null && _baseName(typed) != _baseName(item.name)) {
+        matchNotes.add('“$typed” counted as “${item.name}”');
+      }
+    }
 
     return Card(
       child: Padding(
@@ -635,12 +674,15 @@ class _ResultCard extends StatelessWidget {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: analysis.items.map((item) {
-                        final flagged = _isFlagged(item, reviewed);
-                        final verified = item.userCorrected || reviewed.contains(_nameKey(item.name));
+                      children: analysis.items.asMap().entries.map((entry) {
+                        final i = entry.key;
+                        final item = entry.value;
+                        final flagged = _isFlagged(item, i, reviewed);
+                        final verified = item.userCorrected || reviewed.contains(i);
+                        final shownName = labels[i] ?? item.name;
                         return Chip(
                           label: Text(
-                            '${item.name} (${item.weightG.round()}g, ${item.nutrients.calories.round()} kcal)',
+                            '$shownName (${item.weightG.round()}g, ${item.nutrients.calories.round()} kcal)',
                             style: flagged ? const TextStyle(color: AppColors.danger) : null,
                           ),
                           backgroundColor: flagged ? AppColors.danger.withValues(alpha: 0.08) : null,
@@ -662,6 +704,13 @@ class _ResultCard extends StatelessWidget {
                         'use Correct Meal to confirm or fix them.',
                         style: TextStyle(
                             fontSize: 11.5, color: AppColors.danger, fontStyle: FontStyle.italic),
+                      ),
+                    ],
+                    if (matchNotes.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Closest database match used for the nutrition values: ${matchNotes.join('; ')}.',
+                        style: t.bodySmall?.copyWith(fontSize: 11.5, fontStyle: FontStyle.italic),
                       ),
                     ],
                     if (analysis.unmatchedItems.isNotEmpty) ...[

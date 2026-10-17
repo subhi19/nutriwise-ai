@@ -371,9 +371,7 @@ class MockApi implements NutriApi {
 /// Which form of `corrections` to try FIRST for /api/meal/correct.
 /// true  = a sentence (what the backend team's example showed)
 /// false = a list of {item_index, name, weight_g} (what the AI contract says)
-/// If the server answers 422, the other form is tried automatically.
-/// Once Swagger (MealCorrectionPayload -> corrections) confirms the type, set this to match.
-const kCorrectionsAsText = true;
+const kCorrectionsAsText = false;
 
 String _correctionsToText(MealAnalysis prev, List<ItemCorrection> cs) {
   return cs.map((c) {
