@@ -267,7 +267,7 @@ class _MealPlanScreenState extends ConsumerState<MealPlanScreen> {
                               maxLines: 3,
                               maxLength: 200,
                               decoration: const InputDecoration(
-                                labelText: 'Ask Gemini AI (optional)',
+                                labelText: 'Ask AI (optional)',
                                 hintText: 'e.g. light dinners, high protein, no spicy food',
                                 prefixIcon: Icon(Icons.edit_note),
                               ),

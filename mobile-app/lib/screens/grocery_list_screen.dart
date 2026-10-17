@@ -230,8 +230,12 @@ class _ExtrasCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 IconButton.filled(
                   onPressed: onAdd,
-                  icon: const Icon(Icons.add),
                   tooltip: 'Add item',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    fixedSize: const Size(52, 52),
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 30, color: Colors.white),
                 ),
               ],
             ),

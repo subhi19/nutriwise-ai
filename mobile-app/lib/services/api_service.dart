@@ -368,6 +368,11 @@ class MockApi implements NutriApi {
 /// /api/meal/correct: our AI contract says `corrections` is a list of
 /// {item_index, name, weight_g}. The backend's example showed a plain sentence.
 /// Check MealCorrectionPayload in Swagger (/docs). If it says "string", set this to true.
+/// Which form of `corrections` to try FIRST for /api/meal/correct.
+/// true  = a sentence (what the backend team's example showed)
+/// false = a list of {item_index, name, weight_g} (what the AI contract says)
+/// If the server answers 422, the other form is tried automatically.
+/// Once Swagger (MealCorrectionPayload -> corrections) confirms the type, set this to match.
 const kCorrectionsAsText = true;
 
 String _correctionsToText(MealAnalysis prev, List<ItemCorrection> cs) {
@@ -375,7 +380,11 @@ String _correctionsToText(MealAnalysis prev, List<ItemCorrection> cs) {
     final w = c.weightG == null ? '' : ' (${c.weightG!.round()} g)';
     final i = c.itemIndex;
     if (i != null && i >= 0 && i < prev.items.length) {
-      return 'Replaced "${prev.items[i].name}" with "${c.name}"$w';
+      final old = prev.items[i];
+      if (old.name.trim().toLowerCase() == c.name.trim().toLowerCase()) {
+        return 'Changed the amount of "${old.name}" to ${c.weightG?.round()} g';
+      }
+      return 'Replaced "${old.name}" with "${c.name}"$w';
     }
     return 'Added "${c.name}"$w';
   }).join('; ');
@@ -555,18 +564,32 @@ class RealApi implements NutriApi {
   @override
   Future<MealAnalysis> correctMeal(
       MealAnalysis previous, List<ItemCorrection> corrections, FamilyMember member) async {
-    final Object payloadCorrections = kCorrectionsAsText
-        ? _correctionsToText(previous, corrections)
-        : corrections.map((c) => c.toJson()).toList();
-    try {
+    Future<MealAnalysis> send(Object correctionsPayload) async {
       final res = await _dio.post('/api/meal/correct',
           data: {
-            'request_data': {'previous': previous.toJson(), 'corrections': payloadCorrections},
+            'request_data': {'previous': previous.toJson(), 'corrections': correctionsPayload},
             'member': member.toJson(),
           },
           options: Options(receiveTimeout: const Duration(seconds: 90)));
       return MealAnalysis.fromJson(res.data);
+    }
+
+    final asText = _correctionsToText(previous, corrections);
+    final asList = corrections.map((c) => c.toJson()).toList();
+
+    try {
+      return await send(kCorrectionsAsText ? asText : asList);
     } on DioException catch (e) {
+      // Our two documents disagree about the type of `corrections` (sentence vs list).
+      // If the server rejects the first form (422), try the other one.
+      if (e.response?.statusCode == 422) {
+        debugPrint('meal/correct rejected the first format (422): ${e.response?.data}');
+        try {
+          return await send(kCorrectionsAsText ? asList : asText);
+        } on DioException catch (e2) {
+          _handleError(e2);
+        }
+      }
       _handleError(e);
     }
   }
