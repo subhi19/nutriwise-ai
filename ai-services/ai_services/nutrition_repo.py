@@ -164,6 +164,7 @@ def vector_search_food(name: str):
 
     result = client.rpc("match_foods", {
         "query_embedding": query_embedding,
+        "match_threshold": 0.7,
         "match_count": 1,
     }).execute()
 

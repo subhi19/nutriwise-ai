@@ -21,35 +21,25 @@ This uses the Gemini embedding model, not your normal flash model —
 embeddings have their own separate quota.
 """
 
-from gemini_client import client
-from supabase import create_client
-import os
 import sys
+import os
+# This script lives in scripts/, but gemini_client.py lives in the
+# sibling ai_services/ folder. This line tells Python to also look there.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 import time
-from pathlib import Path
-from dotenv import load_dotenv
-
-# 1. Load backend/.env into environment variables first
-BACKEND_DIR = Path(__file__).resolve().parent.parent.parent / "backend"
-load_dotenv(dotenv_path=BACKEND_DIR / ".env")
-load_dotenv()
-
-# 2. Add ai_services to search path
-AI_SERVICES_DIR = Path(__file__).resolve().parent.parent / "ai_services"
-if str(AI_SERVICES_DIR) not in sys.path:
-    sys.path.insert(0, str(AI_SERVICES_DIR))
-
-
-EMBEDDING_MODEL = "gemini-embedding-001"
+from supabase import create_client
+from ai_services.gemini_client import client
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-# Fallback to SUPABASE_KEY since your .env has the service_role key there
-SERVICE_KEY = os.environ.get(
-    "SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY")
+SERVICE_KEY = os.environ.get("SUPABASE_KEY")
 
 if not SERVICE_KEY:
     raise SystemExit(
-        "Neither SUPABASE_SERVICE_KEY nor SUPABASE_KEY was found in environment or backend/.env."
+        "SUPABASE_SERVICE_KEY is not set. Get it from Supabase -> Project Settings -> API "
+        "(the service_role key), then run:\n"
+        '    $env:SUPABASE_SERVICE_KEY="your_service_role_key"\n'
+        "Use it only in your own terminal, never commit it anywhere."
     )
 
 supabase_client = create_client(SUPABASE_URL, SERVICE_KEY)
@@ -57,58 +47,46 @@ supabase_client = create_client(SUPABASE_URL, SERVICE_KEY)
 
 def embed_text(text: str) -> list[float]:
     response = client.models.embed_content(
-        model=EMBEDDING_MODEL,
+        model="gemini-embedding-001",
         contents=[text],
     )
-    if hasattr(response, "embeddings") and response.embeddings:
-        return response.embeddings[0].values
-    elif hasattr(response, "embedding") and response.embedding:
-        return response.embedding.values
-    else:
-        raise ValueError(f"Unexpected response: {response}")
+    return response.embeddings[0].values
 
 
 def main():
-    print("Fetching food items from Supabase...")
-    result = supabase_client.table("foods").select(
-        "id, name, aliases, category").execute()
+    result = supabase_client.table("foods").select("id, name, aliases, category").execute()
     foods = result.data
 
     print(f"Found {len(foods)} foods to process.")
     failed = []
 
     for i, food in enumerate(foods):
+        # Combine name + aliases + category into one descriptive text,
+        # so the embedding captures more context than the bare name alone
         text = food["name"]
         if food.get("aliases"):
             text += f", also known as {food['aliases']}"
         if food.get("category"):
             text += f", a {food['category']} dish"
 
-        try:
-            embedding = embed_text(text)
-            update = (
-                supabase_client.table("foods")
-                .update({"embedding": embedding})
-                .eq("id", food["id"])
-                .execute()
-            )
+        embedding = embed_text(text)
 
-            if not update.data:
-                failed.append(food["name"])
-                print(f"  [{i + 1}/{len(foods)}] {food['name']} — NOT SAVED")
-            else:
-                print(f"  [{i + 1}/{len(foods)}] {food['name']} — done")
+        update = supabase_client.table("foods").update({"embedding": embedding}).eq("id", food["id"]).execute()
 
-        except Exception as e:
+        # If nothing came back, the save didn't actually happen — don't pretend it did
+        if not update.data:
             failed.append(food["name"])
-            print(f"  [{i + 1}/{len(foods)}] {food['name']} — ERROR: {e}")
+            print(f"  [{i + 1}/{len(foods)}] {food['name']} — NOT SAVED")
+        else:
+            print(f"  [{i + 1}/{len(foods)}] {food['name']} — done")
 
-        time.sleep(0.5)  # Pause to respect Gemini rate limits
+        time.sleep(0.5)  # small pause, be gentle on the free-tier rate limit
 
     if failed:
         print(f"\n{len(failed)} foods were NOT saved: {failed}")
+        print("Check that you used the service_role key, not the anon key.")
     else:
-        print("\nAll foods now have embeddings!")
+        print("\nAll foods now have embeddings.")
 
 
 if __name__ == "__main__":
