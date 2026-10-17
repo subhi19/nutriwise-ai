@@ -17,7 +17,11 @@ class AccountMenuButton extends ConsumerWidget {
       icon: const Icon(Icons.account_circle_outlined, size: 30, color: AppColors.primaryDark),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       onSelected: (value) {
-        if (value == 'logout') _confirmAndLogout(context, ref);
+        if (value == 'family') {
+          if (GoRouterState.of(context).uri.path != '/profile') context.push('/profile');
+        } else if (value == 'logout') {
+          _confirmAndLogout(context, ref);
+        }
       },
       itemBuilder: (_) => [
         PopupMenuItem<String>(
@@ -34,6 +38,16 @@ class AccountMenuButton extends ConsumerWidget {
           ),
         ),
         const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'family',
+          child: Row(
+            children: [
+              Icon(Icons.family_restroom_outlined, size: 20, color: AppColors.primary),
+              SizedBox(width: 10),
+              Text('My family'),
+            ],
+          ),
+        ),
         const PopupMenuItem<String>(
           value: 'logout',
           child: Row(

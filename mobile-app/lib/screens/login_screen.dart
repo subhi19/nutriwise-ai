@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/inline_error.dart';
+import '../widgets/app_back_button.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -62,6 +63,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const AppBackButton(fallback: '/'),
+                  const SizedBox(height: 12),
                   const Center(child: AppLogo(size: 76)),
                   const SizedBox(height: 16),
                   Text('Welcome Back', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge),

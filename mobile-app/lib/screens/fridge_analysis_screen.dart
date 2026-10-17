@@ -143,7 +143,7 @@ class _FridgeAnalysisScreenState extends ConsumerState<FridgeAnalysisScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              const AppBrandBar(),
+              AppBrandBar(backTo: '/dashboard', confirmLeave: _recipes is AsyncData),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),

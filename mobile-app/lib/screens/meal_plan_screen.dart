@@ -194,7 +194,7 @@ class _MealPlanScreenState extends ConsumerState<MealPlanScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              const AppBrandBar(),
+              AppBrandBar(backTo: '/dashboard', confirmLeave: _planResult is AsyncData),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),

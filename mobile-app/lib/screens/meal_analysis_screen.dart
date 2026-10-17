@@ -303,7 +303,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              const AppBrandBar(),
+              AppBrandBar(backTo: '/dashboard', confirmLeave: _result is AsyncData),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),

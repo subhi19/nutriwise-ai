@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/providers.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_logo.dart';
+import '../widgets/app_back_button.dart';
 
 class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
@@ -65,6 +66,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const AppBackButton(fallback: '/login'),
+                  const SizedBox(height: 12),
                   const Center(child: AppLogo(size: 72)),
                   const SizedBox(height: 14),
                   Text('Create Account', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge),

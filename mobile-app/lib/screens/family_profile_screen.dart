@@ -25,7 +25,7 @@ class FamilyProfileScreen extends ConsumerWidget {
         child: SafeArea(
           child: Column(
             children: [
-              const AppBrandBar(),
+              const AppBrandBar(backTo: '/dashboard'),
               const ScreenHeading(
                 emoji: '👪',
                 title: 'Your Family',

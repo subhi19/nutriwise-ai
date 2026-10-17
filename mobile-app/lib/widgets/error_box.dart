@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
 import '../services/api_service.dart';
@@ -10,6 +11,10 @@ class ErrorBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isApi = error is ApiException;
+    // Unexpected errors (e.g. a response that doesn't match our models) show a generic
+    // message to the user. Print the real cause for developers.
+    if (!isApi && kDebugMode) debugPrint('Unexpected error: $error');
+
     final message = isApi ? (error as ApiException).message : 'Something went wrong. Please try again.';
     final canRetry = (isApi ? (error as ApiException).retry : true) && onRetry != null;
 

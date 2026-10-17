@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../widgets/app_background.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/inline_error.dart';
+import '../widgets/app_back_button.dart';
 
 class ForgotPasswordScreen extends ConsumerStatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -66,6 +67,8 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const AppBackButton(fallback: '/login'),
+                  const SizedBox(height: 12),
                   const Center(child: AppLogo(size: 76)),
                   const SizedBox(height: 16),
                   Text('Forgot Password?',

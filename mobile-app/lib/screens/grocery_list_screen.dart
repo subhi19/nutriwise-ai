@@ -91,19 +91,13 @@ class _GroceryListScreenState extends ConsumerState<GroceryListScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              const AppBrandBar(),
+              AppBrandBar(backTo: '/dashboard', confirmLeave: _checked.isNotEmpty),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (context.canPop())
-                        TextButton.icon(
-                          onPressed: () => context.pop(),
-                          icon: const Icon(Icons.arrow_back, size: 18),
-                          label: const Text('Back to plan'),
-                        ),
                       Text('🛒 Grocery List', style: Theme.of(context).textTheme.titleLarge),
                       const SizedBox(height: 4),
                       Text('Only what you still need to buy',

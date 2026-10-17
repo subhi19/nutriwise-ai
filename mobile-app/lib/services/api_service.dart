@@ -400,8 +400,8 @@ class RealApi implements NutriApi {
 
   final Dio _dio = Dio(BaseOptions(
     baseUrl: kApiBaseUrl,
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 30),
+    connectTimeout: const Duration(minutes: 10),
+    receiveTimeout: const Duration(minutes: 10),
   ));
 
   Never _handleError(DioException e) {
