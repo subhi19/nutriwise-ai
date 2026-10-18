@@ -27,56 +27,58 @@ class DashboardScreen extends StatelessWidget {
                           const gap = 14.0;
                           final cardSize = (constraints.maxWidth - gap) / 2;
 
-                          return Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  SizedBox(
-                                    width: cardSize,
-                                    height: cardSize,
-                                    child: _FeatureCard(
-                                      emoji: '📸',
-                                      label: 'Analyze',
-                                      bgColor: const Color(0xFFDCF0EC),
-                                      accent: AppColors.primary,
-                                      title: 'Nutrient Analyzer',
-                                      description: 'Snap a meal photo and see nutrients instantly.',
-                                      onTap: () => context.push('/meal'),
+                          return SingleChildScrollView(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: cardSize,
+                                      height: cardSize,
+                                      child: _FeatureCard(
+                                        emoji: '📸',
+                                        label: 'Analyze',
+                                        bgColor: const Color(0xFFDCF0EC),
+                                        accent: AppColors.primary,
+                                        title: 'Nutrient Analyzer',
+                                        description: 'Snap a meal photo and see nutrients instantly.',
+                                        onTap: () => context.push('/meal'),
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: gap),
-                                  SizedBox(
-                                    width: cardSize,
-                                    height: cardSize,
-                                    child: _FeatureCard(
-                                      emoji: '📅',
-                                      label: 'Plan',
-                                      bgColor: const Color(0xFFFCE3DE),
-                                      accent: AppColors.secondary,
-                                      title: 'Meal Planner',
-                                      description: 'Build a 7-day plan and a grocery list in one tap.',
-                                      onTap: () => context.push('/plan'),
+                                    const SizedBox(width: gap),
+                                    SizedBox(
+                                      width: cardSize,
+                                      height: cardSize,
+                                      child: _FeatureCard(
+                                        emoji: '📅',
+                                        label: 'Plan',
+                                        bgColor: const Color(0xFFFCE3DE),
+                                        accent: AppColors.secondary,
+                                        title: 'Meal Planner',
+                                        description: 'Build a 7-day plan and a grocery list in one tap.',
+                                        onTap: () => context.push('/plan'),
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: gap),
-                              SizedBox(
-                                width: cardSize,
-                                height: cardSize,
-                                child: _FeatureCard(
-                                  emoji: '🧊',
-                                  label: 'Reduce Waste',
-                                  bgColor: const Color(0xFFFCF0D6),
-                                  accent: AppColors.tertiary,
-                                  title: 'Home Inventory',
-                                  description: 'Upload a fridge photo for a quick meal suggestion.',
-                                  onTap: () => context.push('/fridge'),
+                                  ],
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: gap),
+                                SizedBox(
+                                  width: cardSize,
+                                  height: cardSize,
+                                  child: _FeatureCard(
+                                    emoji: '🧊',
+                                    label: 'Reduce Waste',
+                                    bgColor: const Color(0xFFFCF0D6),
+                                    accent: AppColors.tertiary,
+                                    title: 'Home Inventory',
+                                    description: 'Upload a fridge photo for a quick meal suggestion.',
+                                    onTap: () => context.push('/fridge'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
                         },
                       ),
