@@ -650,7 +650,7 @@ class _PlanLoading extends StatelessWidget {
             const SizedBox(height: 12),
             Text('Building your family\'s week…', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 4),
-            Text('This can take up to a minute.', style: Theme.of(context).textTheme.bodySmall),
+            Text('This can take up to few minutes.', style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),

@@ -58,7 +58,7 @@ class MealAnalysisScreen extends ConsumerStatefulWidget {
 
 class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
   Uint8List? _imageBytes;
-  final _notesCtrl = TextEditingController();
+  //final _notesCtrl = TextEditingController();
   AsyncValue<MealAnalysis>? _result;
   bool _saving = false;
   final GlobalKey _cardKey = GlobalKey();
@@ -72,11 +72,11 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
   /// the typed name for display.
   final Map<int, String> _labels = {};
 
-  @override
+  /*@override
   void dispose() {
     _notesCtrl.dispose();
     super.dispose();
-  }
+  }*/
 
   Future<void> _pickImage(ImageSource source) async {
     final bytes = await pickPhoto(context, source);
@@ -443,7 +443,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                               ?.copyWith(color: AppColors.textSecondary)),
                       const SizedBox(height: 16),
                       _ImagePickerCard(imageBytes: _imageBytes, onPick: _pickImage),
-                      const SizedBox(height: 12),
+                      /*const SizedBox(height: 12),
                       TextField(
                         controller: _notesCtrl,
                         decoration: const InputDecoration(
@@ -451,7 +451,7 @@ class _MealAnalysisScreenState extends ConsumerState<MealAnalysisScreen> {
                           hintText: 'e.g. extra spicy, homemade',
                           prefixIcon: Icon(Icons.edit_note),
                         ),
-                      ),
+                      ),*/
                       const SizedBox(height: 16),
                       membersAsync.when(
                         loading: () => const SizedBox.shrink(),
