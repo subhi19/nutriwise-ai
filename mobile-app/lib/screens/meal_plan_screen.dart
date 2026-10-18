@@ -267,7 +267,7 @@ class _MealPlanScreenState extends ConsumerState<MealPlanScreen> {
                               maxLines: 3,
                               maxLength: 200,
                               decoration: const InputDecoration(
-                                labelText: 'Ask Gemini AI (optional)',
+                                labelText: 'Ask AI (optional)',
                                 hintText: 'e.g. light dinners, high protein, no spicy food',
                                 prefixIcon: Icon(Icons.edit_note),
                               ),
@@ -650,7 +650,7 @@ class _PlanLoading extends StatelessWidget {
             const SizedBox(height: 12),
             Text('Building your family\'s week…', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 4),
-            Text('This can take up to a minute.', style: Theme.of(context).textTheme.bodySmall),
+            Text('This can take up to few minutes.', style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
