@@ -13,8 +13,8 @@ import '../models/meal_type.dart';
 import '../models/nutrient_totals.dart';
 import '../models/recipe.dart';
 
-const kApiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
-
+// const kApiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
+const ApiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'https://nutriwise-backend-688441197651.asia-southeast1.run.app');
 // Flip to true once AI/backend confirm they accept `day_preferences`.
 const kSendDayPreferences = true;
 
@@ -406,7 +406,7 @@ class RealApi implements NutriApi {
   }
 
   final Dio _dio = Dio(BaseOptions(
-    baseUrl: kApiBaseUrl,
+    baseUrl: ApiBaseUrl,
     connectTimeout: const Duration(minutes: 10),
     receiveTimeout: const Duration(minutes: 10),
   ));
