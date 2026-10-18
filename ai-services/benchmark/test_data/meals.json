@@ -1,0 +1,38 @@
+[
+  {
+    "file": "meal1.jpg",
+    "foods": ["rice", "chicken", "bell pepper", "onion", "sesame seeds", "parsley"]
+  },
+  {
+    "file": "meal2.jpg",
+    "foods": ["fried rice", "shrimp", "green peas", "carrot", "bell pepper", "onion"]
+  },
+  {
+    "file": "meal3.jpg",
+    "foods": ["salmon", "asparagus", "broccoli", "carrot", "cherry tomatoes", "radish", "mushrooms"]
+  },
+  {
+    "file": "meal4.jpg",
+    "foods": ["lettuce", "tomatoes", "cucumber", "onion", "arugula"]
+  },
+  {
+    "file": "meal5.jpg",
+    "foods": ["tofu", "broccoli", "rice", "sesame seeds"]
+  },
+  {
+    "file": "meal6.jpg",
+    "foods": ["chicken katsu", "kalbi beef short ribs", "rice", "macaroni salad", "green onion", "sesame seeds"]
+  },
+  {
+    "file": "meal7.jpg",
+    "foods": ["steak", "potato", "asparagus", "rosemary"]
+  },
+  {
+    "file": "meal8.jpg",
+    "foods": ["avocado", "tomatoes", "quinoa", "arugula", "feta cheese", "spinach"]
+  },
+  {
+    "file": "meal9.jpg",
+    "foods": ["chicken kebab", "french fries", "lettuce", "tomatoes", "cucumber", "red cabbage", "parsley"]
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "file": "fridge1.jpg",
+    "items": ["leafy greens", "orange juice", "milk", "oranges", "apples", "lemon", "red onion", "cucumber", "watermelon", "melon", "bell pepper", "napa cabbage", "carrots", "bananas", "red cabbage", "tomatoes", "cauliflower", "broccoli", "corn", "grapes", "pineapple", "green juice"]
+  },
+  {
+    "file": "fridge2.jpg",
+    "items": ["tomatoes", "red bell pepper", "yellow bell pepper", "cucumber", "red onion", "beetroot", "carrot", "green onion", "lettuce", "savoy cabbage", "eggplant"]
+  },
+  {
+    "file": "fridge3.jpg",
+    "items": ["cherry tomatoes", "broccoli", "lettuce", "cucumber", "red bell pepper", "oranges", "lemon", "herbs"]
+  },
+  {
+    "file": "fridge4.jpg",
+    "items": ["eggs", "bananas", "apple", "tomatoes", "red bell pepper", "lettuce", "packaged meat", "juice"]
+  },
+  {
+    "file": "fridge5.jpg",
+    "items": ["pickled cucumbers", "cauliflower", "cabbage", "broccoli", "dill", "apples", "orange bell pepper", "grapes", "sausages", "raw meat", "cheese", "onions", "sauerkraut", "tangerine"]
+  }
+]

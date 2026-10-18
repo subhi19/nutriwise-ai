@@ -1,0 +1,229 @@
+{
+  "date": "2026-10-17T22:12:41.748159",
+  "model": "gemini-2.5-flash",
+  "metrics": [
+    {
+      "metric": "Meal photo analysis time (avg)",
+      "result": "12.82 s",
+      "target": "under 20 s",
+      "status": "PASS"
+    },
+    {
+      "metric": "Fridge photo analysis time (avg)",
+      "result": "9.21 s",
+      "target": "under 20 s",
+      "status": "PASS"
+    },
+    {
+      "metric": "Recipe suggestion time (avg)",
+      "result": "54.51 s",
+      "target": "under 40 s",
+      "status": "FAIL"
+    },
+    {
+      "metric": "Weekly plan generation time (avg)",
+      "result": "236.11 s",
+      "target": "under 300 s",
+      "status": "PASS"
+    },
+    {
+      "metric": "Grocery list generation time (avg)",
+      "result": "26.48 s",
+      "target": "under 40 s",
+      "status": "PASS"
+    },
+    {
+      "metric": "End-to-end journey: fridge to grocery list",
+      "result": "326.3 s",
+      "target": "under 300 s",
+      "status": "FAIL"
+    },
+    {
+      "metric": "Meal foods correctly identified",
+      "result": "36 of 46 (78%)",
+      "target": "80%",
+      "status": "FAIL"
+    },
+    {
+      "metric": "Meal items matched to foods database",
+      "result": "50 of 50 (100%)",
+      "target": "70%",
+      "status": "PASS"
+    },
+    {
+      "metric": "Fridge items correctly identified",
+      "result": "60 of 63 (95%)",
+      "target": "80%",
+      "status": "PASS"
+    },
+    {
+      "metric": "Plan ingredients matched to database",
+      "result": "359 of 410 (88%)",
+      "target": "70%",
+      "status": "PASS"
+    },
+    {
+      "metric": "Plans with valid 7-day structure",
+      "result": "3 of 3",
+      "target": "100%",
+      "status": "PASS"
+    },
+    {
+      "metric": "Calls finished without error",
+      "result": "20 of 21 (95%)",
+      "target": "95%",
+      "status": "PASS"
+    },
+    {
+      "metric": "Real allergen hits flagged by plan check",
+      "result": "6 of 8 (75%)",
+      "target": "100%",
+      "status": "FAIL"
+    }
+  ],
+  "latency": [
+    {
+      "label": "meal",
+      "calls": 9,
+      "ok": 8,
+      "avg": 12.82,
+      "median": 9.59,
+      "p95": 31.75,
+      "max": 31.75
+    },
+    {
+      "label": "fridge",
+      "calls": 5,
+      "ok": 5,
+      "avg": 9.21,
+      "median": 8.25,
+      "p95": 13.18,
+      "max": 13.18
+    },
+    {
+      "label": "recipes",
+      "calls": 1,
+      "ok": 1,
+      "avg": 54.51,
+      "median": 54.51,
+      "p95": 54.51,
+      "max": 54.51
+    },
+    {
+      "label": "plan",
+      "calls": 3,
+      "ok": 3,
+      "avg": 236.11,
+      "median": 196.41,
+      "p95": 334.46,
+      "max": 334.46
+    },
+    {
+      "label": "grocery",
+      "calls": 3,
+      "ok": 3,
+      "avg": 26.48,
+      "median": 25.44,
+      "p95": 29.2,
+      "max": 29.2
+    }
+  ],
+  "meals": {
+    "photos": 8,
+    "expected": 46,
+    "found_expected": 36,
+    "found_total": 50,
+    "found_correct": 36,
+    "items": 50,
+    "items_matched": 50,
+    "items_review": 13,
+    "cal_errors": []
+  },
+  "fridge": {
+    "photos": 5,
+    "expected": 63,
+    "found_expected": 60
+  },
+  "recipes": {
+    "runs": 1,
+    "recipes": 3,
+    "ingredients": 27,
+    "unmatched": 2
+  },
+  "plans": {
+    "plans": 3,
+    "valid": 3,
+    "problems": [],
+    "ingredients": 410,
+    "matched": 359,
+    "violations": 8,
+    "caught": 6,
+    "plans_with_violation": 2,
+    "allergy_plans": 2,
+    "details": [
+      {
+        "family": "Milk allergy, vegetarian",
+        "allergens": [
+          "milk"
+        ],
+        "violations": [
+          {
+            "day": "Monday",
+            "item": "Milk (whole)",
+            "allergen": "milk"
+          },
+          {
+            "day": "Tuesday",
+            "item": "Milk (whole)",
+            "allergen": "milk"
+          },
+          {
+            "day": "Thursday",
+            "item": "Milk (whole)",
+            "allergen": "milk"
+          },
+          {
+            "day": "Saturday",
+            "item": "Milk (whole)",
+            "allergen": "milk"
+          },
+          {
+            "day": "Saturday",
+            "item": "Veggie burger patties (milk-free)",
+            "allergen": "milk"
+          },
+          {
+            "day": "Saturday",
+            "item": "Burger buns (milk-free)",
+            "allergen": "milk"
+          }
+        ],
+        "caught": 6
+      },
+      {
+        "family": "Peanut and egg allergy",
+        "allergens": [
+          "egg",
+          "peanut"
+        ],
+        "violations": [
+          {
+            "day": "Tuesday",
+            "item": "Mayonnaise",
+            "allergen": "egg"
+          },
+          {
+            "day": "Thursday",
+            "item": "Mayonnaise",
+            "allergen": "egg"
+          }
+        ],
+        "caught": 0
+      }
+    ],
+    "groceries": 3,
+    "grocery_violations": 1,
+    "grocery_items": 116,
+    "grocery_not_in_db": 16
+  }
+}
