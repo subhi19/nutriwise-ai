@@ -1,0 +1,1 @@
+void logEvent(String name, [Map<String, Object>? params]) {}
