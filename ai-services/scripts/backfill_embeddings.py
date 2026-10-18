@@ -47,7 +47,7 @@ supabase_client = create_client(SUPABASE_URL, SERVICE_KEY)
 
 def embed_text(text: str) -> list[float]:
     response = client.models.embed_content(
-        model="gemini-embedding-001",
+        model="text-embedding-004",
         contents=[text],
     )
     return response.embeddings[0].values

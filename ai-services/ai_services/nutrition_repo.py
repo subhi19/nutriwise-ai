@@ -157,7 +157,7 @@ def vector_search_food(name: str):
     from gemini_client import client as gemini_client
 
     response = gemini_client.models.embed_content(
-        model="gemini-embedding-001",
+        model="text-embedding-004",
         contents=[name],
     )
     query_embedding = response.embeddings[0].values
