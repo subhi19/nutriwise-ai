@@ -146,9 +146,9 @@ A server crash (HTTP 500) can reach the browser without CORS headers. In that ca
 | Fonts | `google_fonts` (Inter) |
 | Local storage | `shared_preferences`, `path_provider` |
 | Web downloads | `package:web` |
-| API | FastAPI, Python 3.11, SQLAlchemy |
+| API | FastAPI, Python 3.14, SQLAlchemy |
 | AI | Gemini Flash through Vertex AI (`google-genai`) |
-| Embeddings | `gemini-embedding-001`, 768 dimensions (set in `.env`) |
+| Embeddings | `text-embedding-004`, 768 dimensions (set in `.env`) |
 | Database | Google Cloud SQL for PostgreSQL 16 with the `pgvector` extension |
 | Backend hosting | Google Cloud Run, container built from the repo root |
 | Web hosting | Firebase Hosting (a Google Cloud service) |
@@ -228,7 +228,7 @@ Create `backend/.env`. Use your own values and never commit this file.
 # Gemini through Vertex AI (no API key)
 USE_VERTEX=true
 GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_CLOUD_LOCATION=us-central1      # check the model is available in your region
+GOOGLE_CLOUD_LOCATION=asia-southeast1      # check the model is available in your region
 MODEL_NAME=gemini-2.5-flash
 
 # Embeddings for semantic food search.
