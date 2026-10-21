@@ -1,92 +1,142 @@
 """
-backfill_embeddings.py
+backfill_embeddings.py  (Google Cloud SQL + Vertex AI version)
 
-Run this ONCE, after Steps 1-4 are done, to generate an embedding for
-every food already in your table. Run it again any time you add new
-foods, so they get embeddings too.
+Creates an embedding for every food in the foods table and saves it in the
+`embedding` column. The search in nutrition_repo.py compares new searches against
+these vectors, so the model and size used HERE must be the same ones used there.
 
-IMPORTANT — why this needs a different Supabase key:
-Your normal SUPABASE_KEY (the "anon" key) is read-only because of the
-security rule (RLS) we set up earlier. Saving embeddings is a WRITE, so
-with the anon key Supabase would quietly save nothing and show no error.
-This script therefore uses the "service_role" key instead.
+Both read the same two settings from backend/.env:
+    EMBEDDING_MODEL=text-embedding-004      (default)
+    EMBEDDING_DIM=768                       (default; must equal the column size)
 
-  - Find it in Supabase: Project Settings -> API -> service_role key
-  - Set it ONLY in your own terminal, only for this script:
-        $env:SUPABASE_SERVICE_KEY="your_service_role_key"
-  - NEVER put it in the repo, the .env file that gets committed, the
-    backend, or the Flutter app. It can read and change everything.
+Run from the ai-services folder (the one that contains ai_services/ and scripts/):
 
-This uses the Gemini embedding model, not your normal flash model —
-embeddings have their own separate quota.
+    python scripts/backfill_embeddings.py            # only foods with NO embedding yet
+    python scripts/backfill_embeddings.py --all      # redo every food (after changing the model)
+    python scripts/backfill_embeddings.py --pause 1  # slower, if you hit Vertex AI quota (429)
+
+Run it again whenever you add new foods. Use --all after you change
+EMBEDDING_MODEL or EMBEDDING_DIM.
+
+No keys are needed: it signs in with your Google Cloud login
+(gcloud auth application-default login) and uses the Cloud SQL settings in
+backend/.env. There is no service_role key any more.
 """
-
-import sys
+import argparse
 import os
-# This script lives in scripts/, but gemini_client.py lives in the
-# sibling ai_services/ folder. This line tells Python to also look there.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
+import re
+import sys
 import time
-from supabase import create_client
+
+# This script lives in scripts/, but ai_services/ is its sibling folder.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+from ai_services.cloudsql_db import run_query, run_write, vector_literal, close_connection
 from ai_services.gemini_client import client
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SERVICE_KEY = os.environ.get("SUPABASE_KEY")
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-004")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 
-if not SERVICE_KEY:
-    raise SystemExit(
-        "SUPABASE_SERVICE_KEY is not set. Get it from Supabase -> Project Settings -> API "
-        "(the service_role key), then run:\n"
-        '    $env:SUPABASE_SERVICE_KEY="your_service_role_key"\n'
-        "Use it only in your own terminal, never commit it anywhere."
+
+def column_dimension() -> int | None:
+    """The size the embedding column was created with, e.g. 768 for vector(768)."""
+    rows = run_query(
+        "SELECT format_type(atttypid, atttypmod) AS t FROM pg_attribute "
+        "WHERE attrelid = 'foods'::regclass AND attname = 'embedding'"
     )
+    if not rows:
+        return None
+    match = re.search(r"\((\d+)\)", rows[0]["t"] or "")
+    return int(match.group(1)) if match else None
 
-supabase_client = create_client(SUPABASE_URL, SERVICE_KEY)
+
+def food_text(food: dict) -> str:
+    """One descriptive text per food, so the embedding carries more context than
+    the bare name. Keep this the same between runs."""
+    text = food["name"]
+    aliases = food.get("aliases")
+    if isinstance(aliases, (list, tuple)):
+        aliases = ", ".join(str(a) for a in aliases)
+    if aliases:
+        text += f", also known as {aliases}"
+    if food.get("category"):
+        text += f", a {food['category']} dish"
+    return text
 
 
 def embed_text(text: str) -> list[float]:
-    response = client.models.embed_content(
-        model="text-embedding-004",
-        contents=[text],
-    )
-    return response.embeddings[0].values
+    config = None
+    if EMBEDDING_MODEL.startswith("gemini-embedding"):
+        # this model returns 3072 numbers by default; ask for the stored size
+        from google.genai import types
+        config = types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIM)
+    response = client.models.embed_content(model=EMBEDDING_MODEL, contents=[text], config=config)
+    return list(response.embeddings[0].values)
+
+
+def embed_with_retry(text: str, tries: int = 4) -> list[float]:
+    """Retries with a growing pause, so a temporary rate limit (429) does not stop the run."""
+    for attempt in range(1, tries + 1):
+        try:
+            return embed_text(text)
+        except Exception:
+            if attempt == tries:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def main():
-    result = supabase_client.table("foods").select("id, name, aliases, category").execute()
-    foods = result.data
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--all", action="store_true", help="redo every food, not only the missing ones")
+    parser.add_argument("--pause", type=float, default=0.5, help="seconds to wait between foods")
+    args = parser.parse_args()
 
-    print(f"Found {len(foods)} foods to process.")
+    print(f"Embedding model: {EMBEDDING_MODEL}   size: {EMBEDDING_DIM}")
+
+    # Stop early if the column size does not match, instead of failing on every row
+    col_dim = column_dimension()
+    if col_dim is None:
+        raise SystemExit("Could not find the foods.embedding column. Create it first:\n"
+                         f"    ALTER TABLE foods ADD COLUMN embedding vector({EMBEDDING_DIM});")
+    if col_dim != EMBEDDING_DIM:
+        raise SystemExit(
+            f"The embedding column is vector({col_dim}) but EMBEDDING_DIM is {EMBEDDING_DIM}.\n"
+            f"Either set EMBEDDING_DIM={col_dim} in backend/.env, or recreate the column:\n"
+            "    ALTER TABLE foods DROP COLUMN embedding;\n"
+            f"    ALTER TABLE foods ADD COLUMN embedding vector({EMBEDDING_DIM});\n"
+            "and then run this script with --all."
+        )
+
+    where = "" if args.all else "WHERE embedding IS NULL"
+    foods = run_query(f"SELECT id, name, aliases, category FROM foods {where} ORDER BY id")
+    print(f"Found {len(foods)} foods to process" + ("" if args.all else " (those without an embedding)."))
+
     failed = []
-
-    for i, food in enumerate(foods):
-        # Combine name + aliases + category into one descriptive text,
-        # so the embedding captures more context than the bare name alone
-        text = food["name"]
-        if food.get("aliases"):
-            text += f", also known as {food['aliases']}"
-        if food.get("category"):
-            text += f", a {food['category']} dish"
-
-        embedding = embed_text(text)
-
-        update = supabase_client.table("foods").update({"embedding": embedding}).eq("id", food["id"]).execute()
-
-        # If nothing came back, the save didn't actually happen — don't pretend it did
-        if not update.data:
+    for i, food in enumerate(foods, 1):
+        try:
+            vector = embed_with_retry(food_text(food))
+            if len(vector) != EMBEDDING_DIM:
+                raise ValueError(f"model returned {len(vector)} numbers, expected {EMBEDDING_DIM}")
+            changed = run_write(
+                "UPDATE foods SET embedding = CAST(:v AS vector) WHERE id = :id",
+                {"v": vector_literal(vector), "id": food["id"]},
+            )
+            if changed == 0:  # nothing saved, so do not pretend it was
+                raise RuntimeError("the row was not updated")
+            print(f"  [{i}/{len(foods)}] {food['name']} - done")
+        except Exception as e:
             failed.append(food["name"])
-            print(f"  [{i + 1}/{len(foods)}] {food['name']} — NOT SAVED")
-        else:
-            print(f"  [{i + 1}/{len(foods)}] {food['name']} — done")
+            print(f"  [{i}/{len(foods)}] {food['name']} - NOT SAVED ({type(e).__name__}: {str(e)[:100]})")
+        time.sleep(args.pause)
 
-        time.sleep(0.5)  # small pause, be gentle on the free-tier rate limit
-
+    summary = run_query("SELECT count(*) AS total, count(embedding) AS embedded FROM foods")[0]
+    print(f"\nTable now has {summary['embedded']} embeddings for {summary['total']} foods.")
     if failed:
-        print(f"\n{len(failed)} foods were NOT saved: {failed}")
-        print("Check that you used the service_role key, not the anon key.")
+        print(f"{len(failed)} foods were NOT saved: {failed}")
+        print("Run the script again to retry them.")
     else:
-        print("\nAll foods now have embeddings.")
+        print("All processed foods are saved.")
+    close_connection()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # AI Module Contract
 
-Owner: AI module (Gemini Vision, Nutrition DB with RAG, Gemini Flash recommendations)
+Owner: AI module (Gemini Vision on Vertex AI, nutrition database on Cloud SQL with pgvector search, Gemini Flash recommendations)
 Folder in repo: `ai-services/`
 Read by: Backend and Frontend developers
 
@@ -15,8 +15,8 @@ Six Python functions that the backend imports and calls. The mobile app never ca
 | `analyze_meal` | Meal photo to foods, grams, nutrients, missing nutrients, suggestions |
 | `correct_meal` | Recalculate a meal after the user types a corrected or missing dish name |
 | `analyze_fridge` | Fridge photo to an ingredient inventory |
-| `suggest_recipes` | Recipes based on the fridge inventory and family profile |
-| `generate_meal_plan` | 7-day plan with ingredients, based on the family profile and inventory |
+| `suggest_recipes` | Recipes based on the fridge inventory and family profile, with real nutrition |
+| `generate_meal_plan` | 7-day (or fewer-day) plan with ingredients and nutrition, based on the family profile, inventory, per-day preferences and the user's free-text request |
 | `generate_grocery_list` | Grocery list from the plan, inventory, preferences, and user-typed requirements |
 
 ## 2. How to use it
@@ -24,7 +24,6 @@ Six Python functions that the backend imports and calls. The mobile app never ca
 ```bash
 cd ai-services
 pip install -r requirements.txt
-cp .env.example .env
 ```
 
 ```python
@@ -32,25 +31,37 @@ from ai_services import analyze_meal
 result = analyze_meal(image_bytes, "image/jpeg", member)   # returns a MealAnalysis
 ```
 
-**Environment variables**
+**Environment variables** (`backend/.env`)
 
 ```
-GEMINI_API_KEY=your_key_here
-MODEL_NAME=gemini-3.8-flash
-SUPABASE_URL=your_supabase_url
-SUPABASE_READONLY_KEY=your_read_only_key
-USE_MOCK=true
+# Gemini through Vertex AI (no API key)
+USE_VERTEX=true
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+MODEL_NAME=gemini-2.5-flash
+
+# Embeddings for semantic food search. Must be the same model and size
+# that created the vectors stored in the foods table.
+EMBEDDING_MODEL=text-embedding-004
+EMBEDDING_DIM=768
+
+# Google Cloud SQL (PostgreSQL + pgvector)
+CLOUDSQL_INSTANCE=your-project:your-region:your-instance
+DB_NAME=postgres
+DB_USER=postgres
+DB_PASSWORD=your-password
 ```
 
-**Mock switch**
-- `USE_MOCK=true`: every function returns sample data from `ai-services/mocks/`. No AI calls, so it works right away.
-- `USE_MOCK=false`: real Gemini and database calls.
-- The function call is the same in both modes.
+**Sign-in to Google Cloud**
+- Locally: `gcloud auth application-default login`.
+- On Cloud Run: use a service account with the Vertex AI User and Cloud SQL Client roles.
+- There is no Gemini API key and no Supabase key any more. (`USE_VERTEX=false` falls back to a `GEMINI_API_KEY` for quick local tests only.)
 
 **Notes**
 - The functions are synchronous. In FastAPI, use a plain `def` endpoint or `run_in_threadpool`.
-- Keep the Gemini key on the server only, never in the mobile app.
+- Credentials stay on the server only, never in the mobile app.
 - Model names change over time. Update `MODEL_NAME` in `.env` if a model is retired.
+- The database connection is created on first use, so importing `ai_services` never needs a database connection.
 
 ## 3. Function signatures
 
@@ -60,14 +71,20 @@ analyze_meal(image_bytes: bytes, mime_type: str, member: FamilyMember) -> MealAn
 correct_meal(
     previous: MealAnalysis,
     corrections: list[ItemCorrection],
-    member: FamilyMember,
+    member: FamilyMember | None = None,
 ) -> MealAnalysis
 
 analyze_fridge(image_bytes: bytes, mime_type: str) -> FridgeInventory
 
 suggest_recipes(inventory: FridgeInventory, family: list[FamilyMember]) -> RecipeSuggestions
 
-generate_meal_plan(family: list[FamilyMember], inventory: FridgeInventory | None) -> WeeklyPlan
+generate_meal_plan(
+    family: list[FamilyMember],
+    inventory: FridgeInventory | None = None,
+    day_preferences: list[DayPreference] | None = None,
+    avoid_dishes: list[str] | None = None,
+    user_message: str | None = None,
+) -> WeeklyPlan
 
 generate_grocery_list(
     family: list[FamilyMember],
@@ -77,12 +94,17 @@ generate_grocery_list(
 ) -> GroceryList
 ```
 
-## 4. Data models (`ai-services/schemas.py`)
+**`generate_meal_plan` arguments**
+- `day_preferences`: one entry per day the user customised (see `DayPreference`). A request applies to every meal of that day only and overrides the profile for that day. Days with no request use the family profile. Allergies always apply.
+- `user_message`: the free-text request, for example `"plan only tuesday, chinese"`. The AI module works out which days are asked for in code, so `"plan for monday"` returns only Monday, and `"weekend"` or `"weekdays"` are understood. A cuisine named in the message overrides the profile cuisine. A day request outside the asked days is not applied, and a note says so.
+- `avoid_dishes`: dish names from a plan the user just rejected, so "Create new plan" gives different dishes.
 
-This file is the single source of truth for the data shapes.
+## 4. Data models (`ai-services/ai_services/schemas.py`)
+
+This file is the single source of truth for the data shapes. The listing below is a summary; if it differs from `schemas.py`, the file wins.
 
 ```python
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 from pydantic import BaseModel
 
 Confidence = Literal["low", "medium", "high"]
@@ -92,10 +114,18 @@ class FamilyMember(BaseModel):
     name: str
     age: int
     gender: str
-    allergies: list[str] = []           # e.g. "milk", "peanut", "egg"
-    health_conditions: list[str] = []   # e.g. "diabetes", "hypertension"
-    food_preferences: list[str] = []    # e.g. "vegetarian"
-    cuisine_preferences: list[str] = [] # e.g. "Indian", "Italian", "Chinese", "Mexican"; empty = any cuisine
+    allergies: list[str] = []                   # e.g. "milk", "peanut", "egg"
+    anyother_specific_allergy: list[str] = []   # free-text allergies not in the fixed list
+    food_preferences: list[str] = []            # e.g. "vegetarian"
+    cuisine_preferences: list[str] = []         # e.g. "Indian", "Chinese"; empty = any cuisine
+
+class DayPreference(BaseModel):
+    day: str                                    # "Monday" ... "Sunday"
+    meal_type: Optional[Union[str, list[str]]] = None   # dietary type code or label
+    cuisine: Optional[Union[str, list[str]]] = None     # up to 2; this day only
+    preference: Optional[str] = None            # free text, e.g. "light dinner, low oil"
+    # Extra fields are kept. The app's names are mapped automatically:
+    #   cuisine_preferences -> cuisine,  notes -> preference
 
 class NutrientTotals(BaseModel):
     calories: float = 0        # kcal
@@ -108,67 +138,90 @@ class NutrientTotals(BaseModel):
     vitamin_a_mcg: float = 0
     vitamin_c_mg: float = 0
 
+class MealIngredient(BaseModel):          # used in meal plans and recipes
+    name: str
+    food_id: Optional[int] = None         # null if not matched in the database
+    weight_g: float
+    nutrients: NutrientTotals
+    from_fridge: bool = False             # true if it comes from the fridge
+
 class MealItem(BaseModel):
     name: str
-    food_id: Optional[int] = None      # null if not matched in the database
+    food_id: Optional[int] = None         # null if not matched in the database
     weight_g: float
     nutrients: NutrientTotals
     confidence: Confidence
-    needs_review: bool = False         # true if confidence is low or the food was not matched
-    user_corrected: bool = False       # true if the name was typed by the user
+    needs_review: bool = False            # true if confidence is low or the food was not matched
+    user_corrected: bool = False          # true if the name was typed by the user
 
 class MealAnalysis(BaseModel):
     items: list[MealItem]
     total: NutrientTotals
-    missing_nutrients: list[str]       # labels: Protein, Fiber, Iron, Calcium, Vitamin A, Vitamin C
+    missing_nutrients: list[str]          # labels: Protein, Fiber, Iron, Calcium, Vitamin A, Vitamin C
     suggestions: list[str]
-    unmatched_items: list[str] = []    # foods seen or typed but not in the database
+    unmatched_items: list[str] = []       # foods seen or typed but not in the database
 
 class ItemCorrection(BaseModel):
-    item_index: Optional[int] = None   # position in MealAnalysis.items; null = add a dish that was missed
-    name: str                          # dish name typed by the user
-    weight_g: Optional[float] = None   # optional; if null, keep the old weight (replace) or use a standard serving (add)
+    item_index: Optional[int] = None      # position in MealAnalysis.items; null = add a dish that was missed
+    name: str                             # dish name typed by the user
+    weight_g: Optional[float] = None      # optional; null keeps the old weight (replace) or uses a standard serving (add)
+
+class MealCorrectionRequest(BaseModel):
+    previous: MealAnalysis
+    corrections: list[ItemCorrection]
 
 class InventoryItem(BaseModel):
     name: str
-    quantity: Optional[str] = None     # e.g. "6", "1 bunch"; may be null
+    quantity: Optional[str] = None        # e.g. "6", "1 bunch"; may be null
     use_soon: bool = False
+    expiry_estimate: Optional[str] = None # e.g. "Use within 3 days"
 
 class FridgeInventory(BaseModel):
     items: list[InventoryItem]
 
 class Recipe(BaseModel):
     name: str
-    ingredients_from_fridge: list[str]
-    extra_ingredients: list[str] = []
+    ingredients: list[MealIngredient]     # fridge ingredients used, with calculated nutrition
+    pantry_staples: list[str] = []        # salt, oil, spices: assumed available, not tracked
     steps: list[str]
+    total_nutrients: NutrientTotals
+    unmatched_ingredients: list[str] = [] # not found in the database
 
 class RecipeSuggestions(BaseModel):
     recipes: list[Recipe]
 
 class PlannedMeal(BaseModel):
     name: str
-    ingredients: list[str]
+    ingredients: list[MealIngredient]     # each with calculated nutrition
     notes: Optional[str] = None
+    nutrients: NutrientTotals             # total for this meal
 
 class DayPlan(BaseModel):
-    day: str                           # "Monday" ... "Sunday"
+    day: str                              # "Monday" ... "Sunday"
     breakfast: PlannedMeal
     lunch: PlannedMeal
     dinner: PlannedMeal
     snack: Optional[PlannedMeal] = None
-    ingredients: list[str] = []        # all ingredients for the day, combined, without duplicates
+    ingredients: list[str] = []           # all ingredient names for the day, no duplicates
+    nutrients: NutrientTotals             # total for the whole day
+    unmatched_ingredients: list[str] = [] # not found in the database
 
 class WeeklyPlan(BaseModel):
-    days: list[DayPlan]                # always 7 items, Monday to Sunday
+    days: list[DayPlan]                   # Monday to Sunday; fewer days if the request limits the scope
     notes: list[str] = []
 
 class GroceryItem(BaseModel):
     name: str
     food_id: Optional[int] = None
     quantity: str
-    category: str                      # e.g. "Vegetables", "Dairy", "Grains"
+    category: str                         # e.g. "Vegetables", "Dairy", "Grains"
     source: Literal["missing_ingredient", "preference", "user_added"]
+
+class GroceryListRequest(BaseModel):
+    family: list[FamilyMember]
+    plan: WeeklyPlan
+    inventory: Optional[FridgeInventory] = None
+    user_requirements: list[str] = []
 
 class GroceryList(BaseModel):
     items: list[GroceryItem]
@@ -177,7 +230,7 @@ class GroceryList(BaseModel):
 
 ## 5. Sample outputs
 
-These values are sample data only. The same examples are in `ai-services/mocks/`.
+These values are sample data only.
 
 **`analyze_meal` returns `MealAnalysis`**
 
@@ -194,22 +247,11 @@ These values are sample data only. The same examples are in `ai-services/mocks/`
       "confidence": "high",
       "needs_review": false,
       "user_corrected": false
-    },
-    {
-      "name": "Yellow dal",
-      "food_id": 48,
-      "weight_g": 100,
-      "nutrients": {"calories": 110, "protein_g": 6, "carbs_g": 15, "fat_g": 3,
-                    "fiber_g": 3, "iron_mg": 1.6, "calcium_mg": 25,
-                    "vitamin_a_mcg": 5, "vitamin_c_mg": 1},
-      "confidence": "medium",
-      "needs_review": false,
-      "user_corrected": false
     }
   ],
-  "total": {"calories": 305, "protein_g": 10, "carbs_g": 57, "fat_g": 3.4,
-            "fiber_g": 3.6, "iron_mg": 2.1, "calcium_mg": 40,
-            "vitamin_a_mcg": 5, "vitamin_c_mg": 1},
+  "total": {"calories": 195, "protein_g": 4, "carbs_g": 42, "fat_g": 0.4,
+            "fiber_g": 0.6, "iron_mg": 0.5, "calcium_mg": 15,
+            "vitamin_a_mcg": 0, "vitamin_c_mg": 0},
   "missing_nutrients": ["Vitamin C", "Fiber"],
   "suggestions": ["Add a cucumber and tomato salad to increase fiber and vitamin C."],
   "unmatched_items": []
@@ -234,45 +276,72 @@ These values are sample data only. The same examples are in `ai-services/mocks/`
 - If a typed dish is not in the database, it stays in the list with zero nutrients, `food_id: null`, `needs_review: true`, and its name is added to `unmatched_items`.
 - This function does not use the photo, so it is fast.
 
-**`analyze_fridge` returns `FridgeInventory`, `suggest_recipes` returns `RecipeSuggestions`**
+**`analyze_fridge` returns `FridgeInventory`**
 
 ```json
 {
-  "inventory": {
-    "items": [
-      {"name": "Spinach", "quantity": "1 bunch", "use_soon": true},
-      {"name": "Eggs", "quantity": "6", "use_soon": false},
-      {"name": "Milk", "quantity": null, "use_soon": false}
-    ]
-  },
-  "recipes": {
-    "recipes": [
-      {
-        "name": "Spinach omelette",
-        "ingredients_from_fridge": ["Spinach", "Eggs"],
-        "extra_ingredients": ["Salt"],
-        "steps": ["Chop the spinach.", "Beat the eggs and mix in the spinach.", "Cook in a pan for 3 minutes."]
-      }
-    ]
-  }
+  "items": [
+    {"name": "Spinach", "quantity": "1 bunch", "use_soon": true, "expiry_estimate": "Use within 2 days"},
+    {"name": "Eggs", "quantity": "6", "use_soon": false, "expiry_estimate": "About a week"}
+  ]
 }
 ```
 
-**`generate_meal_plan` returns `WeeklyPlan`** (shortened to one day; the real output has 7)
+**`suggest_recipes` returns `RecipeSuggestions`**
+
+```json
+{
+  "recipes": [
+    {
+      "name": "Spinach omelette",
+      "ingredients": [
+        {"name": "Spinach", "food_id": 301, "weight_g": 60, "from_fridge": true,
+         "nutrients": {"calories": 14, "protein_g": 1.7, "carbs_g": 2.2, "fat_g": 0.2,
+                       "fiber_g": 1.3, "iron_mg": 1.6, "calcium_mg": 59,
+                       "vitamin_a_mcg": 281, "vitamin_c_mg": 17}},
+        {"name": "Eggs", "food_id": 44, "weight_g": 100, "from_fridge": true,
+         "nutrients": {"calories": 155, "protein_g": 13, "carbs_g": 1.1, "fat_g": 11,
+                       "fiber_g": 0, "iron_mg": 1.8, "calcium_mg": 50,
+                       "vitamin_a_mcg": 160, "vitamin_c_mg": 0}}
+      ],
+      "pantry_staples": ["Salt", "Oil"],
+      "steps": ["Chop the spinach.", "Beat the eggs and mix in the spinach.", "Cook in a pan for 3 minutes."],
+      "total_nutrients": {"calories": 169, "protein_g": 14.7, "carbs_g": 3.3, "fat_g": 11.2,
+                          "fiber_g": 1.3, "iron_mg": 3.4, "calcium_mg": 109,
+                          "vitamin_a_mcg": 441, "vitamin_c_mg": 17},
+      "unmatched_ingredients": []
+    }
+  ]
+}
+```
+
+**`generate_meal_plan` returns `WeeklyPlan`** (shortened: one day, one meal shown in full; nutrient objects shortened to calories)
 
 ```json
 {
   "days": [
     {
-      "day": "Monday",
-      "breakfast": {"name": "Oats with banana", "ingredients": ["Oats", "Banana", "Milk"], "notes": null},
-      "lunch": {"name": "Brown rice with dal", "ingredients": ["Brown rice", "Yellow dal"], "notes": "Low glycemic option"},
-      "dinner": {"name": "Vegetable soup", "ingredients": ["Carrot", "Beans", "Tomato"], "notes": null},
+      "day": "Tuesday",
+      "breakfast": {
+        "name": "Vegetable congee",
+        "ingredients": [
+          {"name": "Rice", "food_id": 12, "weight_g": 60, "from_fridge": false,
+           "nutrients": {"calories": 78}},
+          {"name": "Spinach", "food_id": 301, "weight_g": 40, "from_fridge": true,
+           "nutrients": {"calories": 9}}
+        ],
+        "notes": "Uses spinach before it spoils.",
+        "nutrients": {"calories": 87}
+      },
+      "lunch": {"name": "...", "ingredients": [], "notes": null, "nutrients": {"calories": 0}},
+      "dinner": {"name": "...", "ingredients": [], "notes": null, "nutrients": {"calories": 0}},
       "snack": null,
-      "ingredients": ["Oats", "Banana", "Milk", "Brown rice", "Yellow dal", "Carrot", "Beans", "Tomato"]
+      "ingredients": ["Rice", "Spinach"],
+      "nutrients": {"calories": 87},
+      "unmatched_ingredients": []
     }
   ],
-  "notes": ["Plan avoids peanuts and is suitable for a diabetic adult."]
+  "notes": ["Plan avoids peanuts."]
 }
 ```
 
@@ -304,24 +373,31 @@ The functions raise `AIServiceError(code, message, retry)` (from `ai_services.er
 
 `message` is a short text that is safe to show to the user.
 
+Any other exception (for example a database or Google Cloud error) is not an `AIServiceError`. The backend should catch it, log it, and return a normal HTTP error. Note that an unhandled crash is sent by the server without CORS headers, so a browser shows it as a CORS error instead of the real message.
+
 ## 7. Behavior and limits
 
 **Where the numbers come from**
-- The AI identifies foods and estimates weights. All nutrient values come from the nutrition table in Supabase, not from the model.
-- Grocery lists are built only from retrieved data (RAG). Items the user typed are marked `user_added`, and anything not found in the database goes to `not_in_database`.
+- The AI names ingredients and estimates weights. It never estimates calories or nutrients. All nutrient values are calculated from the foods table in Cloud SQL.
+- Each ingredient is matched to the foods table by word matching first, then by vector (meaning) search with pgvector as a fallback. Vector matches below the strong-match threshold are flagged `needs_review`.
+- A match is accepted only if it really is the same food. Prepared dishes and different products are rejected, so "chicken" is not matched to "Fried chicken", "green onion" is not matched to "Green tea", and "chicken curry" is not matched to "Curry powder".
+- An ingredient with no good match has `food_id: null` and zero nutrients, and its name is listed in `unmatched_ingredients` (or `unmatched_items`, or `not_in_database` for grocery lists). It is never given an invented number.
+- The same ingredient listed twice in one meal is merged into one line with the weights added up.
+- Ingredient names shown to the user are the plain ingredient names, not the database row's label.
+- Grocery lists contain only ingredients that are not already in the fridge (`from_fridge` is false), plus preference and user-added items.
 
 **Safety**
 - Items that match a member's allergies are removed in code after generation.
 - Suggestions are general nutrition guidance, not medical advice.
 
-**Cuisine preferences**
-- `cuisine_preferences` on each `FamilyMember` is used by `suggest_recipes`, `generate_meal_plan`, and `generate_grocery_list`. Plans and recipes favor the chosen cuisines, and the grocery list is built from foods that match them.
-- If the list is empty, any cuisine can be used.
+**Scope and preferences**
+- `cuisine_preferences` on each `FamilyMember` is used by `suggest_recipes`, `generate_meal_plan`, and `generate_grocery_list`. If the list is empty, any cuisine can be used.
+- Per-day preferences and the `user_message` follow the rules in section 3. Priority for a cuisine, highest first: a day-specific request, then the cuisine named in the message, then the profile.
 - Meal and fridge photo analysis does not depend on cuisine and works for any dish.
 
 **Input limits**
 - Images: JPEG or PNG (WebP also works), up to 5 MB. Pass raw bytes and the MIME type, not base64.
-- Expected time is about 5 to 30 seconds per call, and the weekly plan is the slowest. Use a 90 second timeout.
+- Expected time is about 5 to 30 seconds per call. A full weekly plan is the slowest and can take several minutes in the worst case. Use a long timeout for it (the benchmark target is 300 seconds), and 90 seconds for the other functions.
 
 **Output format**
 - Weights in grams, calories in kcal, iron, calcium, and vitamin C in mg, vitamin A in mcg.
@@ -331,8 +407,10 @@ The functions raise `AIServiceError(code, message, retry)` (from `ai_services.er
 ## 8. What the AI module needs from the team
 
 - **Backend:** pass the image as bytes plus the MIME type, and pass the family member data as `FamilyMember` objects loaded from the database.
-- **Backend:** provide a read-only Supabase key for the nutrition tables. The backend keeps ownership of profiles, history, and saved plans.
+- **Backend:** run with Google Cloud credentials and the Cloud SQL settings above. The foods table (with its embeddings) lives in Cloud SQL. The backend keeps ownership of profiles, history, and saved plans.
+- **Backend:** make sure the backend imports the `ai_services` folder of the same project (the `[startup] ai_services loaded from` line shows which one).
 - **Backend and frontend:** for corrections, send back the previous `MealAnalysis` and the list of `ItemCorrection` items.
+- **Backend and frontend:** for the meal plan, send `day_preferences` and the user's free-text request. The request is best sent as its own `message` field. If it is not, the backend extracts it from the days' `notes`.
 - **Backend and frontend:** for the grocery list, send the meal plan, the inventory (optional), and any items or requirements the user typed as `user_requirements`.
 
 ## 9. Change rule

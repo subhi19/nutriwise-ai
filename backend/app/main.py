@@ -518,6 +518,17 @@ import os
 from dotenv import load_dotenv
 load_dotenv() # isort: skip
 
+# --- Always use the ai-services folder NEXT TO this backend folder ---------
+# Must run BEFORE `import ai_services`. Without it, Python picks up whichever
+# copy of ai_services is on PYTHONPATH or was pip-installed (an old project
+# folder), and edits you make here are ignored.
+import sys as _sys
+from pathlib import Path as _Path
+_AI_SERVICES_ROOT = str(_Path(__file__).resolve().parent.parent.parent / "ai-services")
+if _AI_SERVICES_ROOT in _sys.path:
+    _sys.path.remove(_AI_SERVICES_ROOT)
+_sys.path.insert(0, _AI_SERVICES_ROOT)
+
 from dotenv import load_dotenv
 import os
 import json
@@ -531,6 +542,7 @@ from pydantic import BaseModel, EmailStr
 import bcrypt
 import jwt
 import ai_services
+print("[startup] ai_services loaded from:", ai_services.__file__)
 from ai_services.schemas import (
     FamilyMember,
     MealAnalysis,
@@ -585,7 +597,7 @@ if AI_PKG_DIR not in sys.path:
 
 
 
-# Automatically create tables in Supabase if they do not exist
+# Automatically create tables in Cloud SQL if they do not exist
 Base.metadata.create_all(bind=engine)
 
 # ----------------- RATE LIMITING DEFINITION -----------------
@@ -1098,14 +1110,24 @@ async def generate_meal_plan_endpoint(request: Request, payload: MealPlanPayload
         message = _extract_message_from_days(day_prefs)
     print("[meal_plan] message used:", message)
 
-    result = await run_in_threadpool(
-        ai_services.generate_meal_plan,
-        family=payload.family,
-        inventory=payload.inventory,
-        day_preferences=day_prefs,
-        avoid_dishes=payload.avoid_dishes or raw_body.get("avoidDishes"),
-        user_message=message,
-    )
+    try:
+        result = await run_in_threadpool(
+            ai_services.generate_meal_plan,
+            family=payload.family,
+            inventory=payload.inventory,
+            day_preferences=day_prefs,
+            avoid_dishes=payload.avoid_dishes or raw_body.get("avoidDishes"),
+            user_message=message,
+        )
+    except AIServiceError:
+        raise  # already handled with its own status code
+    except Exception as e:
+        # An unhandled crash is sent WITHOUT CORS headers, so the browser only
+        # shows a confusing "CORS error". Print the real error here, and return
+        # it as a normal HTTP error, which keeps the CORS headers.
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
     return result
 
 

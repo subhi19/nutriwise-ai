@@ -8,10 +8,16 @@ Run from the ai-services folder (the one that contains ai_services/):
 
     python benchmark/run_benchmark.py --init      # create sample test-data files (once)
     python benchmark/run_benchmark.py             # run everything
-    python benchmark/run_benchmark.py --skip-plans --pause 3   # lighter run for free-tier quota
+    python benchmark/run_benchmark.py --skip-plans --pause 3   # lighter run if you hit Vertex AI quota (429) errors
 
-Needs the same environment variables as the app: GEMINI_API_KEY, SUPABASE_URL, SUPABASE_KEY
-(a .env file in ai-services/ is loaded automatically if python-dotenv is installed).
+Needs the same setup as the app (see ai_services/gemini_client.py). The AI calls
+go through Vertex AI, so there is NO Gemini API key. In backend/.env you need:
+    USE_VERTEX=true
+    GOOGLE_CLOUD_PROJECT=your-project-id
+    GOOGLE_CLOUD_LOCATION=us-central1        (or your region)
+and Google Cloud sign-in on this computer:
+    gcloud auth application-default login
+(backend/.env is loaded automatically, the same way gemini_client.py loads it.)
 
 Outputs (in benchmark/results/):
     benchmark_report.md       tables you can paste into your report
@@ -28,6 +34,7 @@ import re
 import statistics
 import sys
 import time
+import traceback
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -35,11 +42,42 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # so "import ai_services" works
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv(HERE.parent / ".env")
-except ImportError:
-    pass
+ENV_FILES_LOADED = []
+
+
+def load_env_files():
+    """Loads KEY=VALUE lines from .env files without needing python-dotenv.
+    Variables already set in the terminal are never overwritten."""
+    candidates = [
+        HERE.parent.parent / "backend" / ".env",  # backend/.env (what gemini_client.py loads)
+        HERE.parent / ".env",                     # ai-services/.env
+        Path.cwd() / ".env",                      # wherever you ran the command
+        HERE.parent.parent / ".env",              # project root
+    ]
+    seen = set()
+    for f in candidates:
+        try:
+            f = f.resolve()
+            if f in seen or not f.is_file():
+                continue
+            seen.add(f)
+            for line in f.read_text(encoding="utf-8-sig").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                if line.lower().startswith("export "):
+                    line = line[7:]
+                key, _, value = line.partition("=")
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                os.environ.setdefault(key.strip(), value)
+            ENV_FILES_LOADED.append(str(f))
+        except Exception as e:  # never crash on a bad .env
+            print(f"Could not read {f}: {e}")
+
+
+load_env_files()
 
 # ---------------------------------------------------------------------------
 # Targets: edit these to match what your team promised. They decide pass/fail.
@@ -86,6 +124,61 @@ SAMPLE_FRIDGE = [
 
 
 # ---------------------------------------------------------------------------
+# Vertex AI pre-flight check (warnings only, it never stops the run)
+# ---------------------------------------------------------------------------
+def check_vertex_setup():
+    project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT") or os.getenv("VERTEX_PROJECT")
+    location = os.getenv("GOOGLE_CLOUD_LOCATION") or os.getenv("GCP_LOCATION") or os.getenv("VERTEX_LOCATION")
+    creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    adc_file = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+    if os.name == "nt":
+        adc_file = Path(os.getenv("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
+
+    print("Vertex AI setup:")
+    print(f"  project  : {project or '(not set in environment; your gemini_client.py may set it in code)'}")
+    print(f"  location : {location or '(not set in environment; your gemini_client.py may set it in code)'}")
+    if creds:
+        print(f"  auth     : service account file {'found' if Path(creds).exists() else 'NOT FOUND'} ({creds})")
+    elif adc_file.exists():
+        print("  auth     : gcloud application-default credentials found")
+    else:
+        print("  auth     : no credentials found. Run `gcloud auth application-default login`")
+        print("             or set GOOGLE_APPLICATION_CREDENTIALS, otherwise every AI call will fail.")
+
+
+def check_setup():
+    """Prints what the benchmark will use, mirroring ai_services/gemini_client.py.
+    Warnings only: it never stops the run, the real import error is shown instead."""
+    print("Environment:")
+    if ENV_FILES_LOADED:
+        for f in ENV_FILES_LOADED:
+            print(f"  loaded .env : {f}")
+    else:
+        print("  no .env file found (looked in backend, ai-services, current folder, project root)")
+
+    use_vertex = os.getenv("USE_VERTEX", "false").lower() in ("true", "1", "yes")
+    print("Vertex AI:")
+    print(f"  USE_VERTEX : {os.getenv('USE_VERTEX', '(not set)')}")
+    if not use_vertex:
+        print("  WARNING: USE_VERTEX is not true, so gemini_client.py will try a Gemini API key")
+        print("           and fail. Add  USE_VERTEX=true  to backend/.env")
+    print(f"  project    : {os.getenv('GOOGLE_CLOUD_PROJECT', '(default in gemini_client.py)')}")
+    print(f"  location   : {os.getenv('GOOGLE_CLOUD_LOCATION', '(default in gemini_client.py)')}")
+    print(f"  model      : {os.getenv('MODEL_NAME', 'gemini-2.5-flash (default)')}")
+
+    creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    adc_file = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+    if os.name == "nt":
+        adc_file = Path(os.getenv("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
+    if creds:
+        print(f"  auth       : service account file {'found' if Path(creds).exists() else 'NOT FOUND'} ({creds})")
+    elif adc_file.exists():
+        print("  auth       : gcloud application-default credentials found")
+    else:
+        print("  auth       : no credentials found. Run `gcloud auth application-default login`")
+
+
+# ---------------------------------------------------------------------------
 # Loading the project
 # ---------------------------------------------------------------------------
 def load_ai():
@@ -102,8 +195,25 @@ def load_ai():
         from ai_services.schemas import FamilyMember, FridgeInventory, InventoryItem
     except Exception as e:
         print(f"\nCould not import ai_services: {type(e).__name__}: {e}")
-        print("Check that you run this from the ai-services folder and that GEMINI_API_KEY,")
-        print("SUPABASE_URL and SUPABASE_KEY are set BEFORE the import (importing connects to both).")
+        # Show exactly where in the project the error was raised
+        try:
+            frames = [f for f in traceback.extract_tb(e.__traceback__)
+                      if "ai_services" in f.filename.replace("\\", "/")]
+            if frames:
+                f = frames[-1]
+                print(f"\n  Raised in: {f.filename}")
+                print(f"  Line {f.lineno}: {f.line}")
+        except Exception:
+            pass
+        if isinstance(e, KeyError):
+            var = e.args[0] if e.args else "?"
+            print(f"\nYour ai_services code reads the environment variable {var} when it is imported,")
+            print("but it is not set. Either add it to backend/.env, or, if your project no longer")
+            print("uses it, remove or change that line in the file shown above.")
+        print("Check that you run this from the ai-services folder and that your Vertex AI")
+        print("settings (USE_VERTEX, GOOGLE_CLOUD_PROJECT, sign-in) are available.")
+        print("Any other variable named in the error above is read by your own ai_services code")
+        print("at import time; add it to backend/.env.")
         sys.exit(1)
     return dict(analyze_meal=analyze_meal, analyze_fridge=analyze_fridge, suggest_recipes=suggest_recipes,
                 generate_meal_plan=generate_meal_plan, generate_grocery_list=generate_grocery_list,
@@ -115,6 +225,7 @@ def load_ai():
 # ---------------------------------------------------------------------------
 CALLS = []
 PAUSE = 1.0
+MODEL_LABEL = None
 
 
 def timed(label, fn, *args, **kwargs):
@@ -128,7 +239,7 @@ def timed(label, fn, *args, **kwargs):
     CALLS.append({"label": label, "seconds": round(seconds, 3), "ok": err is None, "error": err or ""})
     status = "ok" if err is None else "FAILED"
     print(f"  {label:<10} {seconds:6.1f}s  {status}" + (f"  ({err})" if err else ""))
-    time.sleep(PAUSE)  # be gentle on the free-tier rate limit
+    time.sleep(PAUSE)  # be gentle on the Vertex AI per-minute quota
     return out
 
 
@@ -425,7 +536,7 @@ def build_metrics(meals, fridge, recipes, plans, lat):
 def write_outputs(M, lat, meals, fridge, recipes, plans, args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    model = os.getenv("MODEL_NAME", "(default)")
+    model = MODEL_LABEL or os.getenv("MODEL_NAME", "gemini-2.5-flash")
     errors = Counter(c["error"].split(":")[0] for c in CALLS if not c["ok"])
 
     lines = [f"# Prototype Performance Report", "",
@@ -500,8 +611,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--init", action="store_true", help="create sample test_data files and exit")
     ap.add_argument("--repeat", type=int, default=1, help="repeat each test case N times for steadier timings")
-    ap.add_argument("--pause", type=float, default=1.0, help="seconds to wait between calls (raise for free-tier quota)")
-    ap.add_argument("--skip-plans", action="store_true", help="skip weekly plans and grocery lists (they use the most quota)")
+    ap.add_argument("--pause", type=float, default=1.0, help="seconds to wait between calls (raise it if you see 429 / quota errors from Vertex AI)")
+    ap.add_argument("--skip-plans", action="store_true", help="skip weekly plans and grocery lists (they make the most Vertex AI calls)")
     ap.add_argument("--out", default=str(HERE / "results"))
     args = ap.parse_args()
     if args.init:
@@ -509,8 +620,15 @@ def main():
         return
     PAUSE = args.pause
 
+    check_setup()
     ai = load_ai()
-    print(f"Benchmark started. Model: {os.getenv('MODEL_NAME', '(default)')}")
+    global MODEL_LABEL
+    try:
+        from ai_services.gemini_client import MODEL_NAME as _m
+        MODEL_LABEL = _m
+    except Exception:
+        MODEL_LABEL = os.getenv("MODEL_NAME", "gemini-2.5-flash")
+    print(f"Benchmark started. Model: {MODEL_LABEL}")
     meals = test_meals(ai, args.repeat)
     fridge = test_fridge(ai, args.repeat)
     inventory = fridge["inventory"] if fridge else None

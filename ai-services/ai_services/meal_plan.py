@@ -446,6 +446,7 @@ Fridge inventory:
 import json
 import logging
 import re
+from functools import lru_cache
 
 from google.genai import types
 
@@ -747,7 +748,17 @@ def _build_prompt(
         "- Every ingredient must logically belong to the dish "
         "(pancakes have no chicken, a fruit bowl contains fruit, a sandwich has bread "
         "and fillings).\n"
-        "- Do not invent unrelated ingredients."
+        "- Do not invent unrelated ingredients.\n"
+        "- List each ingredient ONCE per dish. If it is used twice, add the "
+        "weights together into a single line.\n"
+        "- Use plain shop-bought ingredient names (e.g. 'chicken breast', "
+        "'spring onion', 'egg', 'rice'), not cooked or ready-made foods like "
+        "'fried chicken'. The cooking method belongs in the dish name.\n"
+        "- Do not add a separate stock/broth line when the dish already "
+        "simmers its main ingredient in water; use 'water' instead.\n"
+        "- Weights are for ONE adult serving. Use realistic portions "
+        "(for example a soup has roughly 50-100 g of meat, not 300 g).\n"
+        "- Skip tiny garnishes under 5 g unless the dish needs them."
     )
 
     # Regenerate flow
@@ -821,54 +832,182 @@ def _fridge_name_set(inventory: FridgeInventory | None) -> set[str]:
     return {item.name.strip().lower() for item in inventory.items}
 
 
+# --- Ingredient match checking ------------------------------------------------
+# search_food() is a fuzzy search, so it can return a row that merely SHARES a
+# word with the ingredient: "chicken" -> "Fried chicken (malaysian style)",
+# "green onion" -> "Green tea (unsweetened)", "bok choy" -> "Cabbage (green)".
+# Every match is checked here before it is accepted. A wrong match is worse
+# than no match, because it adds wrong calories to the meal.
+
+# Words that describe size/colour/state, not WHAT the food is.
+_GENERIC_WORDS = {
+    "fresh", "raw", "large", "small", "medium", "chopped", "sliced", "diced",
+    "minced", "ground", "whole", "green", "red", "yellow", "white", "black",
+    "dried", "cooked", "boiled", "steamed", "grilled", "baked", "roasted",
+    "fried", "plain", "organic", "lean", "boneless", "skinless", "of", "and",
+    "with", "the", "style", "a",
+}
+
+# If the database row has one of these words and the ingredient does not, it is
+# a different product (fried chicken is not chicken, tea is not a vegetable).
+_RISKY_EXTRAS = {
+    "fried", "battered", "tea", "juice", "drink", "soda", "candy", "cake",
+    "pie", "ice", "cookie", "biscuit", "chips", "crisps", "curry", "sauce",
+    "soup", "pudding", "jam", "syrup", "powder", "flavoured", "flavored",
+    "sweetened", "coffee", "beer", "wine", "chocolate", "noodle", "pastry",
+    # prepared dishes and cuisine labels (a recipe, not an ingredient)
+    "style", "malaysian", "indian", "chinese", "thai", "western", "local",
+    "homemade", "restaurant", "hawker", "recipe", "stew", "salad", "sandwich",
+    "burger", "pizza", "goreng", "laksa", "rendang", "satay", "porridge",
+    "congee", "dumpling", "omelette", "omelet", "pancake", "kebab", "biryani",
+    "pulao", "korma", "masala", "tikka", "gravy", "casserole", "wrap", "nasi",
+}
+
+
+def _tokens(text: str) -> list[str]:
+    words = re.findall(r"[a-z]+", (text or "").lower())
+    # crude plural fix: eggs -> egg, tomatoes -> tomato
+    out = []
+    for w in words:
+        if len(w) > 4 and w.endswith("oes"):
+            w = w[:-2]
+        elif len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        out.append(w)
+    return out
+
+
+def _is_good_match(query: str, food_name: str) -> bool:
+    """True if the database row really is the ingredient we asked for."""
+    q_all = _tokens(query)
+    m_all = set(_tokens(food_name))
+    if not q_all or not m_all:
+        return False
+    q = [t for t in q_all if t not in _GENERIC_WORDS] or q_all
+    head = q[-1]                       # "green onion" -> "onion"
+    if head not in m_all:
+        return False                   # the main word must be present
+    coverage = sum(t in m_all for t in q) / len(q)
+    if coverage < 0.5:
+        return False
+    if (m_all - set(q_all)) & _RISKY_EXTRAS:
+        return False                   # e.g. "fried", "tea" the query never asked for
+    return True
+
+
+@lru_cache(maxsize=4096)
+def _cached_search(query: str):
+    return search_food(query)
+
+
+def _find_food(name: str, normalized_name: str):
+    """Look the ingredient up and only return a row that passes the check.
+    Tries a few plain spellings before giving up."""
+    base = normalized_name or name
+    candidates = [normalized_name, name,
+                  f"{base}, raw", f"raw {base}", f"{base} (boiled)", f"boiled {base}"]
+    tried = set()
+    for query in candidates:
+        query = (query or "").strip().lower()
+        if not query or query in tried:
+            continue
+        tried.add(query)
+        food = _cached_search(query)
+        if not food:
+            continue
+        if _is_good_match(normalized_name, food["name"]) or _is_good_match(name, food["name"]):
+            return food
+        logger.info("Rejected weak match: '%s' (searched '%s') -> '%s'",
+                    name, query, food["name"])
+    return None
+
+
+def _display_name(name: str) -> str:
+    name = name.strip()
+    return name[:1].upper() + name[1:]
+
+
 def _resolve_ingredients(
     raw_ingredients: list[dict],
     fridge_names: set[str] | None = None,
+    meal_name: str | None = None,
 ) -> tuple[list[MealIngredient], list[str]]:
     """
     Takes Gemini's raw ingredient list (names + weights + from_fridge) and
     turns it into real MealIngredient objects with calculated nutrition.
 
-    from_fridge is true if Gemini said so OR the original name matches a
-    fridge item (guards against Gemini labelling it wrongly).
+    - Only database rows that pass _is_good_match are used.
+    - The same ingredient listed twice in one meal is merged into ONE line
+      (weights added up, nutrition recalculated).
+    - from_fridge is true if Gemini said so OR the original name matches a
+      fridge item (guards against Gemini labelling it wrongly).
 
     Returns (ingredients, unmatched_names).
     """
     fridge_names = fridge_names or set()
-    ingredients = []
-    unmatched = []
+    ingredients: list[MealIngredient] = []
+    foods: list[dict | None] = []          # same order as `ingredients`
+    index_by_key: dict[str, int] = {}
+    unmatched: list[str] = []
 
     for raw in raw_ingredients:
-        name = raw["name"]
+        name = (raw.get("name") or "").strip()
+        if not name:
+            continue
+        # Gemini sometimes lists the dish itself as an ingredient: skip it
+        if meal_name and name.lower() == meal_name.strip().lower():
+            continue
         weight_g = raw.get("weight_g") or 0
         normalized_name = normalize_food_name(name)
         from_fridge = (
             bool(raw.get("from_fridge", False))
-            or name.strip().lower() in fridge_names
+            or name.lower() in fridge_names
             or normalized_name in fridge_names
         )
 
-        food = search_food(normalized_name)
+        food = _find_food(name, normalized_name)
         logger.debug("Ingredient '%s' -> '%s' | in DB: %s",
                      name, normalized_name, food is not None)
 
+        key = f"id:{food['id']}" if food else f"name:{normalized_name}"
+        if key in index_by_key:
+            # Duplicate in the same meal: add the weight to the existing line
+            i = index_by_key[key]
+            ing = ingredients[i]
+            ing.weight_g = (ing.weight_g or 0) + weight_g
+            try:
+                ing.from_fridge = bool(getattr(ing, "from_fridge", False)) or from_fridge
+            except (ValueError, AttributeError):
+                pass  # older schemas.py without the from_fridge field
+            if foods[i]:
+                ing.nutrients = NutrientTotals(**calculate_nutrients(foods[i], ing.weight_g))
+            continue
+
         if food:
             nutrients = calculate_nutrients(food, weight_g)
-            ingredients.append(MealIngredient(
-                name=food["name"], food_id=food["id"], weight_g=weight_g,
+            # Show Gemini's plain ingredient name ("chicken"), not the database
+            # row's label, which can read like a recipe. Nutrition still comes
+            # from the matched row (food_id).
+            ing = MealIngredient(
+                name=_display_name(name), food_id=food["id"], weight_g=weight_g,
                 nutrients=NutrientTotals(**nutrients),
                 from_fridge=from_fridge,
-            ))
+            )
         else:
             # Not in the database: zero nutrients, flagged as unmatched
-            ingredients.append(MealIngredient(
-                name=name, food_id=None, weight_g=weight_g,
+            ing = MealIngredient(
+                name=_display_name(name), food_id=None, weight_g=weight_g,
                 nutrients=NutrientTotals(
                     calories=0, protein_g=0, carbs_g=0, fat_g=0,
                 ),
                 from_fridge=from_fridge,
-            ))
-            unmatched.append(name)
+            )
+            if name not in unmatched:
+                unmatched.append(name)
+
+        index_by_key[key] = len(ingredients)
+        ingredients.append(ing)
+        foods.append(food)
 
     return ingredients, unmatched
 
@@ -879,7 +1018,7 @@ def _build_meal(
 ) -> tuple[PlannedMeal, list[str]]:
     """Builds one PlannedMeal (breakfast/lunch/dinner/snack) with its total nutrients."""
     ingredients, unmatched = _resolve_ingredients(
-        raw_meal["ingredients"], fridge_names)
+        raw_meal["ingredients"], fridge_names, raw_meal.get("name"))
     totals = add_totals([ing.nutrients.model_dump() for ing in ingredients])
 
     meal = PlannedMeal(

@@ -1,52 +1,52 @@
 {
-  "date": "2026-10-17T22:12:41.748159",
+  "date": "2026-10-21T11:00:40.224006",
   "model": "gemini-2.5-flash",
   "metrics": [
     {
       "metric": "Meal photo analysis time (avg)",
-      "result": "12.82 s",
+      "result": "23.22 s",
       "target": "under 20 s",
-      "status": "PASS"
+      "status": "FAIL"
     },
     {
       "metric": "Fridge photo analysis time (avg)",
-      "result": "9.21 s",
+      "result": "11.92 s",
       "target": "under 20 s",
       "status": "PASS"
     },
     {
       "metric": "Recipe suggestion time (avg)",
-      "result": "54.51 s",
+      "result": "33.8 s",
       "target": "under 40 s",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "metric": "Weekly plan generation time (avg)",
-      "result": "236.11 s",
+      "result": "73.92 s",
       "target": "under 300 s",
       "status": "PASS"
     },
     {
       "metric": "Grocery list generation time (avg)",
-      "result": "26.48 s",
+      "result": "29.94 s",
       "target": "under 40 s",
       "status": "PASS"
     },
     {
       "metric": "End-to-end journey: fridge to grocery list",
-      "result": "326.3 s",
+      "result": "149.6 s",
       "target": "under 300 s",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "metric": "Meal foods correctly identified",
-      "result": "36 of 46 (78%)",
+      "result": "44 of 51 (86%)",
       "target": "80%",
-      "status": "FAIL"
+      "status": "PASS"
     },
     {
       "metric": "Meal items matched to foods database",
-      "result": "50 of 50 (100%)",
+      "result": "46 of 53 (87%)",
       "target": "70%",
       "status": "PASS"
     },
@@ -58,7 +58,7 @@
     },
     {
       "metric": "Plan ingredients matched to database",
-      "result": "359 of 410 (88%)",
+      "result": "354 of 431 (82%)",
       "target": "70%",
       "status": "PASS"
     },
@@ -70,73 +70,73 @@
     },
     {
       "metric": "Calls finished without error",
-      "result": "20 of 21 (95%)",
+      "result": "21 of 21 (100%)",
       "target": "95%",
       "status": "PASS"
     },
     {
       "metric": "Real allergen hits flagged by plan check",
-      "result": "6 of 8 (75%)",
+      "result": "4 of 4 (100%)",
       "target": "100%",
-      "status": "FAIL"
+      "status": "PASS"
     }
   ],
   "latency": [
     {
       "label": "meal",
       "calls": 9,
-      "ok": 8,
-      "avg": 12.82,
-      "median": 9.59,
-      "p95": 31.75,
-      "max": 31.75
+      "ok": 9,
+      "avg": 23.22,
+      "median": 22.57,
+      "p95": 45.01,
+      "max": 45.01
     },
     {
       "label": "fridge",
       "calls": 5,
       "ok": 5,
-      "avg": 9.21,
-      "median": 8.25,
-      "p95": 13.18,
-      "max": 13.18
+      "avg": 11.92,
+      "median": 13.37,
+      "p95": 17.43,
+      "max": 17.43
     },
     {
       "label": "recipes",
       "calls": 1,
       "ok": 1,
-      "avg": 54.51,
-      "median": 54.51,
-      "p95": 54.51,
-      "max": 54.51
+      "avg": 33.8,
+      "median": 33.8,
+      "p95": 33.8,
+      "max": 33.8
     },
     {
       "label": "plan",
       "calls": 3,
       "ok": 3,
-      "avg": 236.11,
-      "median": 196.41,
-      "p95": 334.46,
-      "max": 334.46
+      "avg": 73.92,
+      "median": 76.61,
+      "p95": 82.2,
+      "max": 82.2
     },
     {
       "label": "grocery",
       "calls": 3,
       "ok": 3,
-      "avg": 26.48,
-      "median": 25.44,
-      "p95": 29.2,
-      "max": 29.2
+      "avg": 29.94,
+      "median": 32.57,
+      "p95": 44.91,
+      "max": 44.91
     }
   ],
   "meals": {
-    "photos": 8,
-    "expected": 46,
-    "found_expected": 36,
-    "found_total": 50,
-    "found_correct": 36,
-    "items": 50,
-    "items_matched": 50,
-    "items_review": 13,
+    "photos": 9,
+    "expected": 51,
+    "found_expected": 44,
+    "found_total": 53,
+    "found_correct": 46,
+    "items": 53,
+    "items_matched": 46,
+    "items_review": 7,
     "cal_errors": []
   },
   "fridge": {
@@ -147,17 +147,17 @@
   "recipes": {
     "runs": 1,
     "recipes": 3,
-    "ingredients": 27,
-    "unmatched": 2
+    "ingredients": 36,
+    "unmatched": 3
   },
   "plans": {
     "plans": 3,
     "valid": 3,
     "problems": [],
-    "ingredients": 410,
-    "matched": 359,
-    "violations": 8,
-    "caught": 6,
+    "ingredients": 431,
+    "matched": 354,
+    "violations": 4,
+    "caught": 4,
     "plans_with_violation": 2,
     "allergy_plans": 2,
     "details": [
@@ -168,37 +168,17 @@
         ],
         "violations": [
           {
-            "day": "Monday",
-            "item": "Milk (whole)",
-            "allergen": "milk"
-          },
-          {
-            "day": "Tuesday",
-            "item": "Milk (whole)",
-            "allergen": "milk"
-          },
-          {
             "day": "Thursday",
-            "item": "Milk (whole)",
+            "item": "Coconut milk",
             "allergen": "milk"
           },
           {
             "day": "Saturday",
-            "item": "Milk (whole)",
-            "allergen": "milk"
-          },
-          {
-            "day": "Saturday",
-            "item": "Veggie burger patties (milk-free)",
-            "allergen": "milk"
-          },
-          {
-            "day": "Saturday",
-            "item": "Burger buns (milk-free)",
+            "item": "Soy milk",
             "allergen": "milk"
           }
         ],
-        "caught": 6
+        "caught": 2
       },
       {
         "family": "Peanut and egg allergy",
@@ -208,22 +188,22 @@
         ],
         "violations": [
           {
-            "day": "Tuesday",
-            "item": "Mayonnaise",
+            "day": "Wednesday",
+            "item": "Mayonnaise (egg-free)",
             "allergen": "egg"
           },
           {
-            "day": "Thursday",
-            "item": "Mayonnaise",
+            "day": "Saturday",
+            "item": "Caesar dressing (egg-free)",
             "allergen": "egg"
           }
         ],
-        "caught": 0
+        "caught": 2
       }
     ],
     "groceries": 3,
-    "grocery_violations": 1,
-    "grocery_items": 116,
-    "grocery_not_in_db": 16
+    "grocery_violations": 2,
+    "grocery_items": 112,
+    "grocery_not_in_db": 26
   }
 }
