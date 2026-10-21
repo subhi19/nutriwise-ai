@@ -209,7 +209,7 @@ nutriwise-ai/
 
 ### Prerequisites
 
-- Python 3.11 and the Flutter SDK (stable channel; `flutter doctor` should show no problems for the platforms you target)
+- Python 3.14 and the Flutter SDK (stable channel; `flutter doctor` should show no problems for the platforms you target)
 - Google Chrome for web development. Android Studio for Android, Xcode for iOS (macOS only).
 - The Google Cloud CLI, signed in:
 
@@ -467,7 +467,7 @@ The backend imports the `ai-services` folder, so build the container from the **
 `Dockerfile` (repo root):
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /srv
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
@@ -496,7 +496,7 @@ gcloud run deploy nutriwise-backend \
   --add-cloudsql-instances your-project:your-region:your-instance \
   --min-instances 0 --max-instances 3 \
   --allow-unauthenticated \
-  --set-env-vars "USE_VERTEX=true,GOOGLE_CLOUD_PROJECT=your-project-id,GOOGLE_CLOUD_LOCATION=us-central1,MODEL_NAME=gemini-2.5-flash,EMBEDDING_MODEL=gemini-embedding-001,EMBEDDING_DIM=768,CLOUDSQL_INSTANCE=your-project:your-region:your-instance,DB_NAME=postgres,DB_USER=your-db-user" \
+  --set-env-vars "USE_VERTEX=true,GOOGLE_CLOUD_PROJECT=your-project-id,GOOGLE_CLOUD_LOCATION=asia-southeast1,MODEL_NAME=gemini-2.5-flash,EMBEDDING_MODEL=gemini-embedding-001,EMBEDDING_DIM=768,CLOUDSQL_INSTANCE=your-project:your-region:your-instance,DB_NAME=postgres,DB_USER=your-db-user" \
   --set-secrets "DB_PASSWORD=nutriwise-db-password:latest,JWT_SECRET=nutriwise-jwt-secret:latest"
 ```
 
